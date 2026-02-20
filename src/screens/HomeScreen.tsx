@@ -30,6 +30,7 @@ import { useLibraryStore } from "../stores/libraryStore";
 import { usePlayerStore } from "../stores/playerStore";
 import type { Album, Artist, Song, SortOption } from "../types/music";
 import { sortSongs } from "../utils/format";
+import { shareAlbum, shareArtist, shareSong } from "../utils/share";
 
 const HOME_TABS = ["Suggested", "Songs", "Artists", "Albums", "Folders"];
 const SONG_SORT_OPTIONS: SortOption[] = [
@@ -59,12 +60,22 @@ export const HomeScreen = () => {
   const cacheSongs = useLibraryStore((state) => state.cacheSongs);
   const toggleFavorite = useLibraryStore((state) => state.toggleFavorite);
   const isFavorite = useLibraryStore((state) => state.isFavorite);
+  const playlists = useLibraryStore((state) => state.playlists);
+  const addSongToPlaylist = useLibraryStore((state) => state.addSongToPlaylist);
+  const createPlaylist = useLibraryStore((state) => state.createPlaylist);
+  const toggleFollowArtist = useLibraryStore((state) => state.toggleFollowArtist);
+  const isFollowingArtist = useLibraryStore((state) => state.isFollowingArtist);
+  const toggleFollowAlbum = useLibraryStore((state) => state.toggleFollowAlbum);
+  const isFollowingAlbum = useLibraryStore((state) => state.isFollowingAlbum);
   const recentlyPlayed = useAppStore((state) => state.recentlyPlayed);
 
   const [activeTab, setActiveTab] = useState("Suggested");
   const [songSort, setSongSort] = useState<SortOption>("Ascending");
   const [sortVisible, setSortVisible] = useState(false);
   const [songSheet, setSongSheet] = useState<Song | null>(null);
+  const [playlistPickerSong, setPlaylistPickerSong] = useState<Song | null>(null);
+  const [artistSheet, setArtistSheet] = useState<Artist | null>(null);
+  const [albumSheet, setAlbumSheet] = useState<Album | null>(null);
 
   const [suggestedSongs, setSuggestedSongs] = useState<Song[]>([]);
   const [suggestedArtists, setSuggestedArtists] = useState<Artist[]>([]);
@@ -245,6 +256,12 @@ export const HomeScreen = () => {
         onPress: () => toggleFavorite(songSheet),
       },
       {
+        id: "playlist",
+        label: "Add to Playlist",
+        icon: "add-circle-outline" as const,
+        onPress: () => setPlaylistPickerSong(songSheet),
+      },
+      {
         id: "download",
         label: isDownloaded ? "Delete from Device" : "Download Offline",
         icon: isDownloaded ? ("trash-outline" as const) : ("download-outline" as const),
@@ -254,6 +271,14 @@ export const HomeScreen = () => {
           } else {
             void downloadSong(songSheet);
           }
+        },
+      },
+      {
+        id: "share",
+        label: "Share Song",
+        icon: "share-social-outline" as const,
+        onPress: () => {
+          void shareSong(songSheet);
         },
       },
     ];
@@ -268,6 +293,87 @@ export const HomeScreen = () => {
     songSheet,
     toggleFavorite,
   ]);
+
+  const playlistActions = useMemo(() => {
+    if (!playlistPickerSong) {
+      return [];
+    }
+    return [
+      {
+        id: "create",
+        label: "Create New Playlist",
+        icon: "add-outline" as const,
+        onPress: () => {
+          const id = createPlaylist("New Playlist");
+          addSongToPlaylist(id, playlistPickerSong);
+        },
+      },
+      ...playlists.map((playlist) => ({
+        id: playlist.id,
+        label: playlist.name,
+        icon: "musical-notes-outline" as const,
+        onPress: () => addSongToPlaylist(playlist.id, playlistPickerSong),
+      })),
+    ];
+  }, [addSongToPlaylist, createPlaylist, playlistPickerSong, playlists]);
+
+  const artistActions = useMemo(() => {
+    if (!artistSheet) {
+      return [];
+    }
+    const following = isFollowingArtist(artistSheet.id);
+    return [
+      {
+        id: "follow",
+        label: following ? "Unfollow Artist" : "Follow Artist",
+        icon: following ? ("checkmark-circle-outline" as const) : ("add-circle-outline" as const),
+        onPress: () => toggleFollowArtist(artistSheet.id),
+      },
+      {
+        id: "open",
+        label: "Go to Artist",
+        icon: "person-outline" as const,
+        onPress: () => navigation.navigate("ArtistDetails", { artist: artistSheet }),
+      },
+      {
+        id: "share",
+        label: "Share Artist",
+        icon: "share-social-outline" as const,
+        onPress: () => {
+          void shareArtist(artistSheet);
+        },
+      },
+    ];
+  }, [artistSheet, isFollowingArtist, navigation, toggleFollowArtist]);
+
+  const albumActions = useMemo(() => {
+    if (!albumSheet) {
+      return [];
+    }
+    const following = isFollowingAlbum(albumSheet.id);
+    return [
+      {
+        id: "follow",
+        label: following ? "Unfollow Album" : "Follow Album",
+        icon: following ? ("checkmark-circle-outline" as const) : ("add-circle-outline" as const),
+        onPress: () => toggleFollowAlbum(albumSheet.id),
+      },
+      {
+        id: "open",
+        label: "Go to Album",
+        icon: "disc-outline" as const,
+        onPress: () => navigation.navigate("AlbumDetails", { album: albumSheet }),
+      },
+      {
+        id: "share",
+        label: "Share Album",
+        icon: "share-social-outline" as const,
+        onPress: () => {
+          void shareAlbum(albumSheet);
+        },
+      },
+    ];
+  }, [albumSheet, isFollowingAlbum, navigation, toggleFollowAlbum]);
 
   const renderSuggested = () => (
     <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.pageBottomPad}>
@@ -389,7 +495,7 @@ export const HomeScreen = () => {
           artist={item}
           colors={colors}
           onPress={() => navigation.navigate("ArtistDetails", { artist: item })}
-          onMenuPress={() => {}}
+          onMenuPress={() => setArtistSheet(item)}
         />
       )}
       ListFooterComponent={
@@ -425,7 +531,12 @@ export const HomeScreen = () => {
         </View>
       }
       renderItem={({ item }) => (
-        <AlbumCard album={item} colors={colors} onPress={() => navigation.navigate("AlbumDetails", { album: item })} />
+        <AlbumCard
+          album={item}
+          colors={colors}
+          onPress={() => navigation.navigate("AlbumDetails", { album: item })}
+          onMenuPress={() => setAlbumSheet(item)}
+        />
       )}
       ListFooterComponent={
         albumsLoading ? (
@@ -505,6 +616,36 @@ export const HomeScreen = () => {
         title={songSheet?.title}
         subtitle={songSheet?.artist}
         actions={songActions}
+      />
+
+      <BottomSheet
+        visible={Boolean(playlistPickerSong)}
+        onClose={() => setPlaylistPickerSong(null)}
+        colors={colors}
+        image={playlistPickerSong?.image}
+        title="Add to Playlist"
+        subtitle={playlistPickerSong ? `${playlistPickerSong.title} - ${playlistPickerSong.artist}` : undefined}
+        actions={playlistActions}
+      />
+
+      <BottomSheet
+        visible={Boolean(artistSheet)}
+        onClose={() => setArtistSheet(null)}
+        colors={colors}
+        image={artistSheet?.image}
+        title={artistSheet?.name}
+        subtitle={artistSheet ? `${artistSheet.songCount ?? 0} songs` : undefined}
+        actions={artistActions}
+      />
+
+      <BottomSheet
+        visible={Boolean(albumSheet)}
+        onClose={() => setAlbumSheet(null)}
+        colors={colors}
+        image={albumSheet?.image}
+        title={albumSheet?.name}
+        subtitle={albumSheet?.artistName}
+        actions={albumActions}
       />
     </SafeAreaView>
   );

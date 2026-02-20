@@ -41,6 +41,11 @@ export type Playlist = {
   songIds: string[];
 };
 
+export type HistoryEntry = {
+  songId: string;
+  playedAt: number;
+};
+
 export type PaginatedResult<T> = {
   items: T[];
   total: number;

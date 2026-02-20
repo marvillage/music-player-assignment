@@ -7,6 +7,8 @@ export type RootStackParamList = {
   ArtistDetails: { artist: Artist };
   AlbumDetails: { album: Album };
   Queue: undefined;
+  PlaylistDetails: { playlistId: string };
+  History: undefined;
 };
 
 export type MainTabParamList = {
@@ -15,4 +17,3 @@ export type MainTabParamList = {
   Playlists: undefined;
   Settings: undefined;
 };
-

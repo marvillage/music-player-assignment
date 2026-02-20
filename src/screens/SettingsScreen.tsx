@@ -1,14 +1,19 @@
+import { useNavigation } from "@react-navigation/native";
+import type { NavigationProp } from "@react-navigation/native";
 import { Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useTheme } from "../hooks/useTheme";
+import type { RootStackParamList } from "../navigation/types";
 import { useAppStore } from "../stores/appStore";
 import { usePlayerStore } from "../stores/playerStore";
 
 export const SettingsScreen = () => {
   const { colors, isDark } = useTheme();
+  const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const toggleTheme = useAppStore((state) => state.toggleTheme);
   const clearRecentSearches = useAppStore((state) => state.clearRecentSearches);
+  const clearPlaybackHistory = useAppStore((state) => state.clearPlaybackHistory);
   const clearQueue = usePlayerStore((state) => state.clearQueue);
 
   return (
@@ -39,6 +44,20 @@ export const SettingsScreen = () => {
         <View>
           <Text style={[styles.rowTitle, { color: colors.text }]}>Clear Queue</Text>
           <Text style={[styles.rowMeta, { color: colors.textSecondary }]}>Stop playback and remove queued songs</Text>
+        </View>
+      </Pressable>
+
+      <Pressable style={[styles.row, { borderColor: colors.border, backgroundColor: colors.surface }]} onPress={() => navigation.navigate("History")}>
+        <View>
+          <Text style={[styles.rowTitle, { color: colors.text }]}>Listening History</Text>
+          <Text style={[styles.rowMeta, { color: colors.textSecondary }]}>Review songs you recently played</Text>
+        </View>
+      </Pressable>
+
+      <Pressable style={[styles.row, { borderColor: colors.border, backgroundColor: colors.surface }]} onPress={clearPlaybackHistory}>
+        <View>
+          <Text style={[styles.rowTitle, { color: colors.text }]}>Clear Listening History</Text>
+          <Text style={[styles.rowMeta, { color: colors.textSecondary }]}>Remove your playback timeline data</Text>
         </View>
       </Pressable>
     </SafeAreaView>
@@ -74,4 +93,3 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
 });
-

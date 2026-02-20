@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "music-player-assignment",
-    "slug": "music-player-assignment",
+    "name": "Lokal_Music",
+    "slug": "lokal-music",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -29,8 +29,11 @@
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "WAKE_LOCK",
-        "FOREGROUND_SERVICE"
-      ]
+        "FOREGROUND_SERVICE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ],
+      "package": "com.marvillage.lokalmusic"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -38,6 +41,11 @@
     "plugins": [
       "expo-font",
       "expo-av"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "d2621a9a-73ef-4d4f-b387-84b913c50b56"
+      }
+    }
   }
 }

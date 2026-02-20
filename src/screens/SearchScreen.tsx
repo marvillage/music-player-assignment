@@ -6,6 +6,7 @@ import {
   ActivityIndicator,
   FlatList,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -16,6 +17,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { searchAlbums, searchArtists, searchSongs } from "../api/saavn";
 import { AlbumCard } from "../components/AlbumCard";
 import { ArtistRow } from "../components/ArtistRow";
+import { BottomSheet } from "../components/BottomSheet";
 import { EmptyState } from "../components/EmptyState";
 import { SongRow } from "../components/SongRow";
 import { useTheme } from "../hooks/useTheme";
@@ -24,9 +26,83 @@ import { useAppStore } from "../stores/appStore";
 import { useLibraryStore } from "../stores/libraryStore";
 import { usePlayerStore } from "../stores/playerStore";
 import type { Album, Artist, Song } from "../types/music";
+import { shareSong } from "../utils/share";
 
 const CATEGORIES = ["Songs", "Artists", "Albums", "Folders"] as const;
 type SearchCategory = (typeof CATEGORIES)[number];
+
+const LANGUAGE_FILTERS = ["All", "Hindi", "English", "Punjabi"] as const;
+type LanguageFilter = (typeof LANGUAGE_FILTERS)[number];
+
+const DURATION_FILTERS = ["All", "Short", "Medium", "Long"] as const;
+type DurationFilter = (typeof DURATION_FILTERS)[number];
+
+const TRENDING_FALLBACK = [
+  "anirudh",
+  "weeknd",
+  "arijit singh",
+  "ed sheeran",
+  "love songs",
+  "lofi",
+  "top hindi hits",
+  "dance mix",
+];
+
+const normalizeTerm = (value: string): string =>
+  value.toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+
+const levenshteinDistance = (a: string, b: string): number => {
+  const m = a.length;
+  const n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i += 1) {
+    dp[i][0] = i;
+  }
+  for (let j = 0; j <= n; j += 1) {
+    dp[0][j] = j;
+  }
+  for (let i = 1; i <= m; i += 1) {
+    for (let j = 1; j <= n; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+    }
+  }
+  return dp[m][n];
+};
+
+const findClosestQuery = (input: string, candidates: string[]): string | null => {
+  const source = normalizeTerm(input);
+  if (source.length < 3) {
+    return null;
+  }
+  let best: string | null = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+  candidates.forEach((candidate) => {
+    const normalized = normalizeTerm(candidate);
+    if (!normalized || normalized === source) {
+      return;
+    }
+    const score = levenshteinDistance(source, normalized);
+    if (score < bestScore) {
+      bestScore = score;
+      best = candidate;
+    }
+  });
+  return bestScore <= 3 ? best : null;
+};
+
+const includeByDuration = (song: Song, filter: DurationFilter): boolean => {
+  if (filter === "All") {
+    return true;
+  }
+  if (filter === "Short") {
+    return song.durationSec <= 180;
+  }
+  if (filter === "Medium") {
+    return song.durationSec > 180 && song.durationSec <= 300;
+  }
+  return song.durationSec > 300;
+};
 
 export const SearchScreen = () => {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
@@ -36,17 +112,38 @@ export const SearchScreen = () => {
   const addRecentSearch = useAppStore((state) => state.addRecentSearch);
   const removeRecentSearch = useAppStore((state) => state.removeRecentSearch);
   const clearRecentSearches = useAppStore((state) => state.clearRecentSearches);
+  const topSearches = useAppStore((state) => state.topSearches);
 
   const cacheSongs = useLibraryStore((state) => state.cacheSongs);
   const downloaded = useLibraryStore((state) => state.downloaded);
+  const downloadSong = useLibraryStore((state) => state.downloadSong);
+  const removeDownload = useLibraryStore((state) => state.removeDownload);
+  const toggleFavorite = useLibraryStore((state) => state.toggleFavorite);
+  const isFavorite = useLibraryStore((state) => state.isFavorite);
+  const playlists = useLibraryStore((state) => state.playlists);
+  const addSongToPlaylist = useLibraryStore((state) => state.addSongToPlaylist);
+  const createPlaylist = useLibraryStore((state) => state.createPlaylist);
+
   const setQueueAndPlay = usePlayerStore((state) => state.setQueueAndPlay);
+  const addPlayNext = usePlayerStore((state) => state.addPlayNext);
+  const addToQueue = usePlayerStore((state) => state.addToQueue);
 
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<SearchCategory>("Songs");
+  const [languageFilter, setLanguageFilter] = useState<LanguageFilter>("All");
+  const [durationFilter, setDurationFilter] = useState<DurationFilter>("All");
   const [loading, setLoading] = useState(false);
   const [songs, setSongs] = useState<Song[]>([]);
   const [artists, setArtists] = useState<Artist[]>([]);
   const [albums, setAlbums] = useState<Album[]>([]);
+  const [didYouMean, setDidYouMean] = useState<string | null>(null);
+  const [songSheet, setSongSheet] = useState<Song | null>(null);
+  const [playlistPickerSong, setPlaylistPickerSong] = useState<Song | null>(null);
+
+  const trendingQueries = useMemo(() => {
+    const tracked = topSearches(8);
+    return [...new Set([...tracked, ...TRENDING_FALLBACK])].slice(0, 10);
+  }, [topSearches]);
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -54,16 +151,30 @@ export const SearchScreen = () => {
       setSongs([]);
       setArtists([]);
       setAlbums([]);
+      setDidYouMean(null);
       return;
     }
 
     const timer = setTimeout(async () => {
       setLoading(true);
+      setDidYouMean(null);
       try {
         if (category === "Songs" || category === "Folders") {
           const res = await searchSongs(trimmed, 1);
-          setSongs(res.items);
           cacheSongs(res.items);
+          if (res.items.length > 0) {
+            setSongs(res.items);
+          } else {
+            const suggestion = findClosestQuery(trimmed, [...recentSearches, ...trendingQueries]);
+            if (suggestion) {
+              setDidYouMean(suggestion);
+              const fallback = await searchSongs(suggestion, 1);
+              cacheSongs(fallback.items);
+              setSongs(fallback.items);
+            } else {
+              setSongs([]);
+            }
+          }
         } else if (category === "Artists") {
           const res = await searchArtists(trimmed, 1);
           setArtists(res.items);
@@ -74,12 +185,19 @@ export const SearchScreen = () => {
       } finally {
         setLoading(false);
       }
-    }, 380);
+    }, 350);
 
     return () => clearTimeout(timer);
-  }, [cacheSongs, category, query]);
+  }, [cacheSongs, category, query, recentSearches, trendingQueries]);
 
   const folderSongs = useMemo(() => songs.filter((song) => Boolean(downloaded[song.id])), [downloaded, songs]);
+  const displayedSongs = useMemo(() => {
+    const base = category === "Folders" ? folderSongs : songs;
+    return base.filter((song) => {
+      const languagePass = languageFilter === "All" || song.language?.toLowerCase() === languageFilter.toLowerCase();
+      return languagePass && includeByDuration(song, durationFilter);
+    });
+  }, [category, durationFilter, folderSongs, languageFilter, songs]);
 
   const submitSearch = () => {
     const trimmed = query.trim();
@@ -87,6 +205,122 @@ export const SearchScreen = () => {
       addRecentSearch(trimmed);
     }
   };
+
+  const songActions = useMemo(() => {
+    if (!songSheet) {
+      return [];
+    }
+    const favorite = isFavorite(songSheet.id);
+    const isDownloaded = Boolean(downloaded[songSheet.id]);
+    return [
+      {
+        id: "next",
+        label: "Play Next",
+        icon: "play-skip-forward-outline" as const,
+        onPress: () => addPlayNext(songSheet),
+      },
+      {
+        id: "queue",
+        label: "Add to Playing Queue",
+        icon: "list-circle-outline" as const,
+        onPress: () => addToQueue(songSheet),
+      },
+      {
+        id: "favorite",
+        label: favorite ? "Remove from Favorites" : "Add to Favorites",
+        icon: favorite ? ("heart-dislike-outline" as const) : ("heart-outline" as const),
+        onPress: () => toggleFavorite(songSheet),
+      },
+      {
+        id: "playlist",
+        label: "Add to Playlist",
+        icon: "add-circle-outline" as const,
+        onPress: () => setPlaylistPickerSong(songSheet),
+      },
+      {
+        id: "download",
+        label: isDownloaded ? "Delete from Device" : "Download Offline",
+        icon: isDownloaded ? ("trash-outline" as const) : ("download-outline" as const),
+        onPress: () => {
+          if (isDownloaded) {
+            void removeDownload(songSheet.id);
+          } else {
+            void downloadSong(songSheet);
+          }
+        },
+      },
+      {
+        id: "share",
+        label: "Share Song",
+        icon: "share-social-outline" as const,
+        onPress: () => {
+          void shareSong(songSheet);
+        },
+      },
+    ];
+  }, [addPlayNext, addToQueue, downloadSong, downloaded, isFavorite, removeDownload, songSheet, toggleFavorite]);
+
+  const playlistActions = useMemo(() => {
+    if (!playlistPickerSong) {
+      return [];
+    }
+    return [
+      {
+        id: "create",
+        label: "Create New Playlist",
+        icon: "add-outline" as const,
+        onPress: () => {
+          const id = createPlaylist("New Playlist");
+          addSongToPlaylist(id, playlistPickerSong);
+        },
+      },
+      ...playlists.map((playlist) => ({
+        id: playlist.id,
+        label: playlist.name,
+        icon: "musical-notes-outline" as const,
+        onPress: () => addSongToPlaylist(playlist.id, playlistPickerSong),
+      })),
+    ];
+  }, [addSongToPlaylist, createPlaylist, playlistPickerSong, playlists]);
+
+  const renderSongFilters = () => (
+    <View style={styles.filtersWrap}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+        {LANGUAGE_FILTERS.map((item) => {
+          const active = languageFilter === item;
+          return (
+            <Pressable
+              key={item}
+              onPress={() => setLanguageFilter(item)}
+              style={[
+                styles.filterChip,
+                { borderColor: colors.border, backgroundColor: active ? colors.accentSoft : colors.surface },
+              ]}
+            >
+              <Text style={[styles.filterChipText, { color: active ? colors.accent : colors.textSecondary }]}>{item}</Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+        {DURATION_FILTERS.map((item) => {
+          const active = durationFilter === item;
+          return (
+            <Pressable
+              key={item}
+              onPress={() => setDurationFilter(item)}
+              style={[
+                styles.filterChip,
+                { borderColor: colors.border, backgroundColor: active ? colors.accentSoft : colors.surface },
+              ]}
+            >
+              <Text style={[styles.filterChipText, { color: active ? colors.accent : colors.textSecondary }]}>{item}</Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
 
   const renderRecentSearches = () => (
     <View style={styles.recentWrap}>
@@ -99,6 +333,7 @@ export const SearchScreen = () => {
       <FlatList
         data={recentSearches}
         keyExtractor={(item) => item}
+        ListEmptyComponent={<Text style={[styles.emptyRecent, { color: colors.textSecondary }]}>No recent searches yet.</Text>}
         renderItem={({ item }) => (
           <View style={styles.recentItem}>
             <Pressable
@@ -114,6 +349,22 @@ export const SearchScreen = () => {
             </Pressable>
           </View>
         )}
+        ListFooterComponent={
+          <View style={styles.trendingSection}>
+            <Text style={[styles.trendingTitle, { color: colors.text }]}>Trending Searches</Text>
+            <View style={styles.trendingChips}>
+              {trendingQueries.map((item) => (
+                <Pressable
+                  key={item}
+                  onPress={() => setQuery(item)}
+                  style={[styles.trendingChip, { borderColor: colors.border, backgroundColor: colors.surface }]}
+                >
+                  <Text style={[styles.trendingChipText, { color: colors.text }]}>{item}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        }
       />
     </View>
   );
@@ -127,36 +378,50 @@ export const SearchScreen = () => {
       );
     }
 
-    if (category === "Songs") {
-      if (!songs.length) {
+    if (category === "Songs" || category === "Folders") {
+      if (!displayedSongs.length) {
         return (
-          <EmptyState
-            colors={colors}
-            title="Not Found"
-            message="Sorry, the keyword you entered cannot be found. Try another keyword."
-            icon="sad-outline"
-          />
+          <View style={styles.emptyWrap}>
+            <EmptyState
+              colors={colors}
+              title="Not Found"
+              message="Sorry, the keyword you entered cannot be found. Try another keyword."
+              icon="sad-outline"
+            />
+            {didYouMean ? (
+              <Pressable
+                onPress={() => {
+                  setQuery(didYouMean);
+                  submitSearch();
+                }}
+                style={[styles.didYouMeanChip, { borderColor: colors.accent, backgroundColor: colors.accentSoft }]}
+              >
+                <Text style={[styles.didYouMeanText, { color: colors.accent }]}>Did you mean: {didYouMean}?</Text>
+              </Pressable>
+            ) : null}
+          </View>
         );
       }
       return (
         <FlatList
-          data={songs}
+          data={displayedSongs}
           keyExtractor={(item) => item.id}
+          ListHeaderComponent={renderSongFilters}
           renderItem={({ item, index }) => (
             <SongRow
               song={item}
               colors={colors}
               onPress={() => {
                 submitSearch();
-                void setQueueAndPlay(songs, index);
+                void setQueueAndPlay(displayedSongs, index);
                 navigation.navigate("Player");
               }}
               onPlayPress={() => {
                 submitSearch();
-                void setQueueAndPlay(songs, index);
+                void setQueueAndPlay(displayedSongs, index);
                 navigation.navigate("Player");
               }}
-              onMenuPress={() => {}}
+              onMenuPress={() => setSongSheet(item)}
             />
           )}
           contentContainerStyle={styles.bottomPad}
@@ -226,41 +491,7 @@ export const SearchScreen = () => {
       );
     }
 
-    if (!folderSongs.length) {
-      return (
-        <EmptyState
-          colors={colors}
-          title="No Offline Songs"
-          message="Downloaded songs will appear here."
-          icon="download-outline"
-        />
-      );
-    }
-
-    return (
-      <FlatList
-        data={folderSongs}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item, index }) => (
-          <SongRow
-            song={item}
-            colors={colors}
-            onPress={() => {
-              submitSearch();
-              void setQueueAndPlay(folderSongs, index);
-              navigation.navigate("Player");
-            }}
-            onPlayPress={() => {
-              submitSearch();
-              void setQueueAndPlay(folderSongs, index);
-              navigation.navigate("Player");
-            }}
-            onMenuPress={() => {}}
-          />
-        )}
-        contentContainerStyle={styles.bottomPad}
-      />
-    );
+    return null;
   };
 
   return (
@@ -310,6 +541,26 @@ export const SearchScreen = () => {
       </View>
 
       {!query.trim() ? renderRecentSearches() : renderResults()}
+
+      <BottomSheet
+        visible={Boolean(songSheet)}
+        onClose={() => setSongSheet(null)}
+        colors={colors}
+        image={songSheet?.image}
+        title={songSheet?.title}
+        subtitle={songSheet?.artist}
+        actions={songActions}
+      />
+
+      <BottomSheet
+        visible={Boolean(playlistPickerSong)}
+        onClose={() => setPlaylistPickerSong(null)}
+        colors={colors}
+        image={playlistPickerSong?.image}
+        title="Add to Playlist"
+        subtitle={playlistPickerSong ? `${playlistPickerSong.title} - ${playlistPickerSong.artist}` : undefined}
+        actions={playlistActions}
+      />
     </SafeAreaView>
   );
 };
@@ -364,6 +615,24 @@ const styles = StyleSheet.create({
   loader: {
     paddingTop: 40,
   },
+  filtersWrap: {
+    gap: 8,
+    marginBottom: 8,
+    paddingHorizontal: 16,
+  },
+  filterRow: {
+    gap: 8,
+  },
+  filterChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  filterChipText: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: 13,
+  },
   recentWrap: {
     flex: 1,
     paddingHorizontal: 16,
@@ -384,6 +653,11 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_500Medium",
     fontSize: 16,
   },
+  emptyRecent: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 14,
+    marginVertical: 8,
+  },
   recentItem: {
     alignItems: "center",
     flexDirection: "row",
@@ -396,6 +670,45 @@ const styles = StyleSheet.create({
   recentText: {
     fontFamily: "Poppins_500Medium",
     fontSize: 17,
+  },
+  trendingSection: {
+    marginTop: 14,
+  },
+  trendingTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 18,
+    marginBottom: 8,
+  },
+  trendingChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  trendingChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  trendingChipText: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: 13,
+  },
+  emptyWrap: {
+    flex: 1,
+    justifyContent: "center",
+  },
+  didYouMeanChip: {
+    alignSelf: "center",
+    borderRadius: 999,
+    borderWidth: 1,
+    marginTop: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  didYouMeanText: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: 13,
   },
   bottomPad: {
     paddingBottom: 120,
@@ -410,4 +723,3 @@ const styles = StyleSheet.create({
     paddingTop: 6,
   },
 });
-

@@ -19,6 +19,8 @@ import { FavoritesScreen } from "../screens/FavoritesScreen";
 import { PlaylistsScreen } from "../screens/PlaylistsScreen";
 import { SettingsScreen } from "../screens/SettingsScreen";
 import { MiniPlayer } from "../components/MiniPlayer";
+import { PlaylistDetailsScreen } from "../screens/PlaylistDetailsScreen";
+import { HistoryScreen } from "../screens/HistoryScreen";
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -105,6 +107,8 @@ export const RootNavigator = () => {
         <Stack.Screen name="ArtistDetails" component={ArtistDetailsScreen} />
         <Stack.Screen name="AlbumDetails" component={AlbumDetailsScreen} />
         <Stack.Screen name="Queue" component={QueueScreen} />
+        <Stack.Screen name="PlaylistDetails" component={PlaylistDetailsScreen} />
+        <Stack.Screen name="History" component={HistoryScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

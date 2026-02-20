@@ -1,10 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NavigationProp, RouteProp } from "@react-navigation/native";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { BottomSheet } from "../components/BottomSheet";
 import { getArtistById, getArtistSongs } from "../api/saavn";
 import { SongRow } from "../components/SongRow";
 import { useTheme } from "../hooks/useTheme";
@@ -13,6 +14,7 @@ import { useLibraryStore } from "../stores/libraryStore";
 import { usePlayerStore } from "../stores/playerStore";
 import type { Artist, Song } from "../types/music";
 import { formatDuration } from "../utils/format";
+import { shareArtist, shareSong } from "../utils/share";
 
 type ScreenRoute = RouteProp<RootStackParamList, "ArtistDetails">;
 
@@ -24,12 +26,27 @@ export const ArtistDetailsScreen = () => {
   const [artist, setArtist] = useState<Artist>(route.params.artist);
   const [songs, setSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState(true);
+  const [songSheet, setSongSheet] = useState<Song | null>(null);
+  const [playlistPickerSong, setPlaylistPickerSong] = useState<Song | null>(null);
+  const [artistMenuVisible, setArtistMenuVisible] = useState(false);
 
   const queue = usePlayerStore((state) => state.queue);
   const currentIndex = usePlayerStore((state) => state.currentIndex);
   const isPlaying = usePlayerStore((state) => state.isPlaying);
   const setQueueAndPlay = usePlayerStore((state) => state.setQueueAndPlay);
+  const addToQueue = usePlayerStore((state) => state.addToQueue);
+  const addPlayNext = usePlayerStore((state) => state.addPlayNext);
   const cacheSongs = useLibraryStore((state) => state.cacheSongs);
+  const downloaded = useLibraryStore((state) => state.downloaded);
+  const downloadSong = useLibraryStore((state) => state.downloadSong);
+  const removeDownload = useLibraryStore((state) => state.removeDownload);
+  const toggleFavorite = useLibraryStore((state) => state.toggleFavorite);
+  const isFavorite = useLibraryStore((state) => state.isFavorite);
+  const playlists = useLibraryStore((state) => state.playlists);
+  const addSongToPlaylist = useLibraryStore((state) => state.addSongToPlaylist);
+  const createPlaylist = useLibraryStore((state) => state.createPlaylist);
+  const toggleFollowArtist = useLibraryStore((state) => state.toggleFollowArtist);
+  const isFollowingArtist = useLibraryStore((state) => state.isFollowingArtist);
 
   useEffect(() => {
     let mounted = true;
@@ -61,6 +78,204 @@ export const ArtistDetailsScreen = () => {
 
   const totalDurationSec = songs.reduce((acc, item) => acc + item.durationSec, 0);
 
+  const playAndOpenPlayer = (list: Song[], startIndex: number) => {
+    if (list.length === 0) {
+      return;
+    }
+    void setQueueAndPlay(list, startIndex);
+    navigation.navigate("Player");
+  };
+
+  const shuffleAndPlay = () => {
+    if (songs.length === 0) {
+      return;
+    }
+    const shuffled = [...songs];
+    for (let i = shuffled.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    playAndOpenPlayer(shuffled, 0);
+  };
+
+  const artistActions = useMemo(() => {
+    if (songs.length === 0) {
+      return [];
+    }
+    const following = isFollowingArtist(artist.id);
+    return [
+      {
+        id: "play",
+        label: "Play Songs",
+        icon: "play-outline" as const,
+        onPress: () => playAndOpenPlayer(songs, 0),
+      },
+      {
+        id: "shuffle",
+        label: "Shuffle Play",
+        icon: "shuffle-outline" as const,
+        onPress: shuffleAndPlay,
+      },
+      {
+        id: "queue-all",
+        label: "Add Songs to Queue",
+        icon: "list-circle-outline" as const,
+        onPress: () => songs.forEach((song) => addToQueue(song)),
+      },
+      {
+        id: "download-all",
+        label: "Download All Songs",
+        icon: "download-outline" as const,
+        onPress: () =>
+          songs.forEach((song) => {
+            if (!downloaded[song.id]) {
+              void downloadSong(song);
+            }
+          }),
+      },
+      {
+        id: "favorite-all",
+        label: "Add All to Favorites",
+        icon: "heart-outline" as const,
+        onPress: () =>
+          songs.forEach((song) => {
+            if (!isFavorite(song.id)) {
+              toggleFavorite(song);
+            }
+          }),
+      },
+      {
+        id: "follow-artist",
+        label: following ? "Unfollow Artist" : "Follow Artist",
+        icon: following ? ("checkmark-circle-outline" as const) : ("add-circle-outline" as const),
+        onPress: () => toggleFollowArtist(artist.id),
+      },
+      {
+        id: "share-artist",
+        label: "Share Artist",
+        icon: "share-social-outline" as const,
+        onPress: () => {
+          void shareArtist(artist);
+        },
+      },
+    ];
+  }, [addToQueue, artist, downloadSong, downloaded, isFavorite, isFollowingArtist, songs, toggleFavorite, toggleFollowArtist]);
+
+  const songActions = useMemo(() => {
+    if (!songSheet) {
+      return [];
+    }
+    const favorite = isFavorite(songSheet.id);
+    const isDownloaded = Boolean(downloaded[songSheet.id]);
+    return [
+      {
+        id: "next",
+        label: "Play Next",
+        icon: "play-skip-forward-outline" as const,
+        onPress: () => addPlayNext(songSheet),
+      },
+      {
+        id: "queue",
+        label: "Add to Playing Queue",
+        icon: "list-circle-outline" as const,
+        onPress: () => addToQueue(songSheet),
+      },
+      {
+        id: "album",
+        label: "Go to Album",
+        icon: "disc-outline" as const,
+        onPress: () =>
+          navigation.navigate("AlbumDetails", {
+            album: {
+              id: songSheet.albumId ?? songSheet.id,
+              name: songSheet.albumName ?? "Album",
+              artistName: songSheet.artist,
+              image: songSheet.image,
+              year: songSheet.year,
+            },
+          }),
+      },
+      {
+        id: "artist",
+        label: "Go to Artist",
+        icon: "person-outline" as const,
+        onPress: () =>
+          navigation.navigate("ArtistDetails", {
+            artist: {
+              id: songSheet.id,
+              name: songSheet.artist,
+              image: songSheet.image,
+            },
+          }),
+      },
+      {
+        id: "favorite",
+        label: favorite ? "Remove from Favorites" : "Add to Favorites",
+        icon: favorite ? ("heart-dislike-outline" as const) : ("heart-outline" as const),
+        onPress: () => toggleFavorite(songSheet),
+      },
+      {
+        id: "playlist",
+        label: "Add to Playlist",
+        icon: "add-circle-outline" as const,
+        onPress: () => setPlaylistPickerSong(songSheet),
+      },
+      {
+        id: "download",
+        label: isDownloaded ? "Delete from Device" : "Download Offline",
+        icon: isDownloaded ? ("trash-outline" as const) : ("download-outline" as const),
+        onPress: () => {
+          if (isDownloaded) {
+            void removeDownload(songSheet.id);
+          } else {
+            void downloadSong(songSheet);
+          }
+        },
+      },
+      {
+        id: "share-song",
+        label: "Share Song",
+        icon: "share-social-outline" as const,
+        onPress: () => {
+          void shareSong(songSheet);
+        },
+      },
+    ];
+  }, [
+    addPlayNext,
+    addToQueue,
+    downloadSong,
+    downloaded,
+    isFavorite,
+    navigation,
+    removeDownload,
+    songSheet,
+    toggleFavorite,
+  ]);
+
+  const playlistActions = useMemo(() => {
+    if (!playlistPickerSong) {
+      return [];
+    }
+    return [
+      {
+        id: "create",
+        label: "Create New Playlist",
+        icon: "add-outline" as const,
+        onPress: () => {
+          const id = createPlaylist("New Playlist");
+          addSongToPlaylist(id, playlistPickerSong);
+        },
+      },
+      ...playlists.map((playlist) => ({
+        id: playlist.id,
+        label: playlist.name,
+        icon: "musical-notes-outline" as const,
+        onPress: () => addSongToPlaylist(playlist.id, playlistPickerSong),
+      })),
+    ];
+  }, [addSongToPlaylist, createPlaylist, playlistPickerSong, playlists]);
+
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]} edges={["top"]}>
       <View style={styles.header}>
@@ -68,10 +283,10 @@ export const ArtistDetailsScreen = () => {
           <Ionicons name="arrow-back" size={26} color={colors.text} />
         </Pressable>
         <View style={styles.headerRight}>
-          <Pressable>
+          <Pressable onPress={() => navigation.navigate("Search")}>
             <Ionicons name="search-outline" size={26} color={colors.text} />
           </Pressable>
-          <Pressable>
+          <Pressable onPress={() => setArtistMenuVisible(true)}>
             <Ionicons name="ellipsis-horizontal-circle-outline" size={26} color={colors.text} />
           </Pressable>
         </View>
@@ -88,21 +303,29 @@ export const ArtistDetailsScreen = () => {
               {artist.albumCount ?? 1} Album   |   {songs.length} Songs   |   {formatDuration(totalDurationSec)} mins
             </Text>
             <View style={styles.actions}>
-              <Pressable style={[styles.primaryButton, { backgroundColor: colors.accent }]}>
+              <Pressable style={[styles.primaryButton, { backgroundColor: colors.accent }]} onPress={shuffleAndPlay}>
                 <Ionicons name="shuffle" size={18} color="#FFFFFF" />
                 <Text style={styles.primaryLabel}>Shuffle</Text>
               </Pressable>
               <Pressable
                 style={[styles.secondaryButton, { backgroundColor: colors.accentSoft }]}
-                onPress={() => {
-                  if (songs.length > 0) {
-                    void setQueueAndPlay(songs, 0);
-                    navigation.navigate("Player");
-                  }
-                }}
+                onPress={() => playAndOpenPlayer(songs, 0)}
               >
                 <Ionicons name="play" size={18} color={colors.accent} />
                 <Text style={[styles.secondaryLabel, { color: colors.accent }]}>Play</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.secondaryButton, { backgroundColor: colors.surfaceMuted }]}
+                onPress={() => toggleFollowArtist(artist.id)}
+              >
+                <Ionicons
+                  name={isFollowingArtist(artist.id) ? "checkmark-circle-outline" : "add-circle-outline"}
+                  size={18}
+                  color={colors.text}
+                />
+                <Text style={[styles.secondaryLabel, { color: colors.text }]}>
+                  {isFollowingArtist(artist.id) ? "Following" : "Follow"}
+                </Text>
               </Pressable>
             </View>
             <View style={[styles.songHeader, { borderTopColor: colors.border }]}>
@@ -125,7 +348,7 @@ export const ArtistDetailsScreen = () => {
               void setQueueAndPlay(songs, index);
               navigation.navigate("Player");
             }}
-            onMenuPress={() => {}}
+            onMenuPress={() => setSongSheet(item)}
           />
         )}
         ListFooterComponent={
@@ -137,6 +360,36 @@ export const ArtistDetailsScreen = () => {
             <View style={{ height: 120 }} />
           )
         }
+      />
+
+      <BottomSheet
+        visible={artistMenuVisible}
+        onClose={() => setArtistMenuVisible(false)}
+        colors={colors}
+        image={artist.image}
+        title={artist.name}
+        subtitle={`${songs.length} songs`}
+        actions={artistActions}
+      />
+
+      <BottomSheet
+        visible={Boolean(songSheet)}
+        onClose={() => setSongSheet(null)}
+        colors={colors}
+        image={songSheet?.image}
+        title={songSheet?.title}
+        subtitle={songSheet?.artist}
+        actions={songActions}
+      />
+
+      <BottomSheet
+        visible={Boolean(playlistPickerSong)}
+        onClose={() => setPlaylistPickerSong(null)}
+        colors={colors}
+        image={playlistPickerSong?.image}
+        title="Add to Playlist"
+        subtitle={playlistPickerSong ? `${playlistPickerSong.title} - ${playlistPickerSong.artist}` : undefined}
+        actions={playlistActions}
       />
     </SafeAreaView>
   );
@@ -226,4 +479,3 @@ const styles = StyleSheet.create({
     paddingVertical: 24,
   },
 });
-

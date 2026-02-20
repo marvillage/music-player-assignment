@@ -18,6 +18,7 @@ type PlayerState = {
   positionSec: number;
   repeatMode: RepeatMode;
   shuffleEnabled: boolean;
+  sleepTimerEndsAt: number | null;
   sound: Audio.Sound | null;
   initialized: boolean;
   hydrated: boolean;
@@ -39,6 +40,8 @@ type PlayerState = {
   clearQueue: () => Promise<void>;
   toggleShuffle: () => void;
   cycleRepeatMode: () => void;
+  setSleepTimer: (minutes: number) => void;
+  clearSleepTimer: () => void;
   playTrackEndBehavior: () => Promise<void>;
 };
 
@@ -66,6 +69,16 @@ const stopAndRelease = async (sound: Audio.Sound | null) => {
   }
 };
 
+let sleepTimerHandle: ReturnType<typeof setTimeout> | null = null;
+
+const clearSleepTimerHandle = () => {
+  if (!sleepTimerHandle) {
+    return;
+  }
+  clearTimeout(sleepTimerHandle);
+  sleepTimerHandle = null;
+};
+
 export const usePlayerStore = create<PlayerState>()(
   persist(
     (set, get) => ({
@@ -76,6 +89,7 @@ export const usePlayerStore = create<PlayerState>()(
       positionSec: 0,
       repeatMode: "off",
       shuffleEnabled: false,
+      sleepTimerEndsAt: null,
       sound: null,
       initialized: false,
       hydrated: false,
@@ -325,6 +339,34 @@ export const usePlayerStore = create<PlayerState>()(
           repeatMode:
             state.repeatMode === "off" ? "all" : state.repeatMode === "all" ? "one" : "off",
         })),
+      setSleepTimer: (minutes) => {
+        clearSleepTimerHandle();
+        if (minutes <= 0 || !Number.isFinite(minutes)) {
+          set({ sleepTimerEndsAt: null });
+          return;
+        }
+
+        const timeoutMs = Math.max(1, Math.floor(minutes * 60 * 1000));
+        const endsAt = Date.now() + timeoutMs;
+        set({ sleepTimerEndsAt: endsAt });
+
+        sleepTimerHandle = setTimeout(async () => {
+          sleepTimerHandle = null;
+          const sound = get().sound;
+          if (sound) {
+            try {
+              await sound.pauseAsync();
+            } catch {
+              // no-op
+            }
+          }
+          set({ isPlaying: false, sleepTimerEndsAt: null });
+        }, timeoutMs);
+      },
+      clearSleepTimer: () => {
+        clearSleepTimerHandle();
+        set({ sleepTimerEndsAt: null });
+      },
       playTrackEndBehavior: async () => {
         const state = get();
         if (state.repeatMode === "one") {
