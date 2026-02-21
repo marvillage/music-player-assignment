@@ -8,6 +8,7 @@ export type SheetAction = {
   label: string;
   icon?: keyof typeof Ionicons.glyphMap;
   active?: boolean;
+  showRadio?: boolean;
   onPress: () => void;
 };
 
@@ -48,7 +49,13 @@ export const BottomSheet = ({ visible, title, subtitle, image, colors, actions, 
           <Text style={[styles.actionLabel, { color: action.active ? colors.accent : colors.text }]}>
             {action.label}
           </Text>
-          {action.active ? <Ionicons name="radio-button-on" size={18} color={colors.accent} /> : null}
+          {action.showRadio ? (
+            <Ionicons
+              name={action.active ? "radio-button-on" : "radio-button-off"}
+              size={21}
+              color={colors.accent}
+            />
+          ) : null}
         </Pressable>
       ))}
     </View>
@@ -122,4 +129,3 @@ const styles = StyleSheet.create({
     marginLeft: 14,
   },
 });
-

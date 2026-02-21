@@ -1,4 +1,4 @@
-# Lokal_Music
+# Mume
 
 React Native (Expo + TypeScript) music player using the JioSaavn API clone.
 

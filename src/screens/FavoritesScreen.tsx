@@ -2,7 +2,7 @@ import { useNavigation } from "@react-navigation/native";
 import type { NavigationProp } from "@react-navigation/native";
 import { useMemo } from "react";
 import { FlatList, StyleSheet, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { EmptyState } from "../components/EmptyState";
 import { SongRow } from "../components/SongRow";
@@ -14,6 +14,7 @@ import { usePlayerStore } from "../stores/playerStore";
 export const FavoritesScreen = () => {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const favorites = useLibraryStore((state) => state.favorites);
   const songCache = useLibraryStore((state) => state.songCache);
   const toggleFavorite = useLibraryStore((state) => state.toggleFavorite);
@@ -30,7 +31,10 @@ export const FavoritesScreen = () => {
 
   if (items.length === 0) {
     return (
-      <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]}>
+      <SafeAreaView
+        style={[styles.safe, { backgroundColor: colors.background, paddingTop: Math.max(insets.top, 10) }]}
+        edges={["left", "right", "bottom"]}
+      >
         <EmptyState
           colors={colors}
           title="No Favorites Yet"
@@ -42,7 +46,10 @@ export const FavoritesScreen = () => {
   }
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]} edges={["top"]}>
+    <SafeAreaView
+      style={[styles.safe, { backgroundColor: colors.background, paddingTop: Math.max(insets.top, 10) }]}
+      edges={["left", "right", "bottom"]}
+    >
       <View style={styles.header}>
         <Text style={[styles.title, { color: colors.text }]}>Favorites</Text>
       </View>

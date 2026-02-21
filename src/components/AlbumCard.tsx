@@ -20,7 +20,13 @@ export const AlbumCard = ({ album, colors, onPress, onMenuPress, compact }: Prop
         {album.name}
       </Text>
       {onMenuPress ? (
-        <Pressable onPress={onMenuPress} hitSlop={8}>
+        <Pressable
+          onPress={(event) => {
+            event.stopPropagation();
+            onMenuPress();
+          }}
+          hitSlop={8}
+        >
           <Ionicons name="ellipsis-vertical" size={16} color={colors.text} />
         </Pressable>
       ) : null}
@@ -67,4 +73,3 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
 });
-

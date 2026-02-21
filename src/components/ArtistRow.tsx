@@ -22,7 +22,13 @@ export const ArtistRow = ({ artist, colors, onPress, onMenuPress }: Props) => (
         {artist.albumCount ?? 1} Album   |   {artist.songCount ?? 0} Songs
       </Text>
     </View>
-    <Pressable onPress={onMenuPress} hitSlop={8}>
+    <Pressable
+      onPress={(event) => {
+        event.stopPropagation();
+        onMenuPress?.();
+      }}
+      hitSlop={8}
+    >
       <Ionicons name="ellipsis-vertical" size={18} color={colors.text} />
     </Pressable>
   </Pressable>
@@ -54,4 +60,3 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
 });
-

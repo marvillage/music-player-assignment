@@ -16,6 +16,8 @@ import { formatDuration } from "../utils/format";
 import { shareSong } from "../utils/share";
 
 type PlayerRoute = RouteProp<RootStackParamList, "Player">;
+const PLAYBACK_SPEED_OPTIONS = [0.675, 0.75, 0.9, 1, 1.1, 1.25, 1.5] as const;
+const formatPlaybackRateLabel = (rate: number) => `${rate}x`;
 
 export const PlayerScreen = () => {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
@@ -24,6 +26,7 @@ export const PlayerScreen = () => {
   const [menuVisible, setMenuVisible] = useState(false);
   const [playlistPickerSong, setPlaylistPickerSong] = useState<Song | null>(null);
   const [sleepMenuVisible, setSleepMenuVisible] = useState(false);
+  const [speedMenuVisible, setSpeedMenuVisible] = useState(false);
   const [now, setNow] = useState(Date.now());
 
   const song = usePlayerStore((state) => state.currentSong());
@@ -33,6 +36,7 @@ export const PlayerScreen = () => {
   const durationSec = usePlayerStore((state) => state.durationSec);
   const shuffle = usePlayerStore((state) => state.shuffleEnabled);
   const repeat = usePlayerStore((state) => state.repeatMode);
+  const playbackRate = usePlayerStore((state) => state.playbackRate);
   const setQueueAndPlay = usePlayerStore((state) => state.setQueueAndPlay);
   const playSongNow = usePlayerStore((state) => state.playSongNow);
   const togglePlayPause = usePlayerStore((state) => state.togglePlayPause);
@@ -42,6 +46,7 @@ export const PlayerScreen = () => {
   const skipPrevious = usePlayerStore((state) => state.skipPrevious);
   const addPlayNext = usePlayerStore((state) => state.addPlayNext);
   const addToQueue = usePlayerStore((state) => state.addToQueue);
+  const setPlaybackRate = usePlayerStore((state) => state.setPlaybackRate);
   const toggleShuffle = usePlayerStore((state) => state.toggleShuffle);
   const cycleRepeatMode = usePlayerStore((state) => state.cycleRepeatMode);
   const sleepTimerEndsAt = usePlayerStore((state) => state.sleepTimerEndsAt);
@@ -89,15 +94,30 @@ export const PlayerScreen = () => {
 
     return [
       {
+        id: "shuffle",
+        label: shuffle ? "Shuffle: On" : "Shuffle: Off",
+        icon: "shuffle-outline" as const,
+        active: shuffle,
+        onPress: toggleShuffle,
+      },
+      {
+        id: "repeat",
+        label:
+          repeat === "off" ? "Repeat: Off" : repeat === "all" ? "Repeat: All Songs" : "Repeat: One Song",
+        icon: "repeat-outline" as const,
+        active: repeat !== "off",
+        onPress: cycleRepeatMode,
+      },
+      {
         id: "next",
         label: "Play Next",
-        icon: "play-skip-forward-outline" as const,
+        icon: "arrow-forward-circle-outline" as const,
         onPress: () => addPlayNext(song),
       },
       {
         id: "queue",
         label: "Add to Playing Queue",
-        icon: "list-circle-outline" as const,
+        icon: "document-text-outline" as const,
         onPress: () => addToQueue(song),
       },
       {
@@ -167,7 +187,7 @@ export const PlayerScreen = () => {
       {
         id: "share",
         label: "Share Song",
-        icon: "share-social-outline" as const,
+        icon: "paper-plane-outline" as const,
         onPress: () => {
           void shareSong(song);
         },
@@ -176,6 +196,7 @@ export const PlayerScreen = () => {
   }, [
     addPlayNext,
     addToQueue,
+    cycleRepeatMode,
     createPlaylist,
     downloadSong,
     downloaded,
@@ -183,7 +204,10 @@ export const PlayerScreen = () => {
     navigation,
     removeDownload,
     song,
+    shuffle,
     sleepTimerEndsAt,
+    repeat,
+    toggleShuffle,
     toggleFavorite,
   ]);
 
@@ -209,6 +233,20 @@ export const PlayerScreen = () => {
       })),
     ];
   }, [addSongToPlaylist, createPlaylist, playlistPickerSong, playlists]);
+
+  const speedActions = useMemo(
+    () =>
+      PLAYBACK_SPEED_OPTIONS.map((rate) => ({
+        id: `speed-${rate}`,
+        label: formatPlaybackRateLabel(rate),
+        active: Math.abs(playbackRate - rate) < 0.001,
+        showRadio: true,
+        onPress: () => {
+          void setPlaybackRate(rate);
+        },
+      })),
+    [playbackRate, setPlaybackRate]
+  );
 
   const sleepActions = [
     {
@@ -330,18 +368,18 @@ export const PlayerScreen = () => {
       </View>
 
       <View style={styles.subControls}>
-        <Pressable onPress={toggleShuffle}>
-          <Ionicons name="shuffle" size={26} color={shuffle ? colors.accent : colors.text} />
-        </Pressable>
-        <Pressable onPress={cycleRepeatMode}>
+        <Pressable onPress={() => setSpeedMenuVisible(true)}>
           <Ionicons
-            name={repeat === "one" ? "repeat-outline" : "repeat"}
-            size={26}
-            color={repeat === "off" ? colors.text : colors.accent}
+            name="speedometer-outline"
+            size={24}
+            color={Math.abs(playbackRate - 1) > 0.001 ? colors.accent : colors.text}
           />
         </Pressable>
+        <Pressable onPress={() => setSleepMenuVisible(true)}>
+          <Ionicons name="timer-outline" size={24} color={sleepTimerEndsAt ? colors.accent : colors.text} />
+        </Pressable>
         <Pressable onPress={() => navigation.navigate("Queue")}>
-          <Ionicons name="list" size={26} color={colors.text} />
+          <Ionicons name="tv-outline" size={24} color={colors.text} />
         </Pressable>
         <Pressable onPress={() => setMenuVisible(true)}>
           <Ionicons name="ellipsis-vertical" size={24} color={colors.text} />
@@ -383,6 +421,15 @@ export const PlayerScreen = () => {
         title="Sleep Timer"
         subtitle={sleepLabel ? `Playback stops in ${sleepLabel}` : "No active sleep timer"}
         actions={sleepActions}
+      />
+
+      <BottomSheet
+        visible={speedMenuVisible}
+        onClose={() => setSpeedMenuVisible(false)}
+        colors={colors}
+        title="Playback Speed"
+        subtitle={`Current: ${formatPlaybackRateLabel(playbackRate)}`}
+        actions={speedActions}
       />
     </SafeAreaView>
   );

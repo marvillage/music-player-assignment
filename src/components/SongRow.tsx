@@ -39,7 +39,10 @@ export const SongRow = ({
 
     <View style={styles.actions}>
       <Pressable
-        onPress={onPlayPress}
+        onPress={(event) => {
+          event.stopPropagation();
+          onPlayPress?.();
+        }}
         style={[styles.playButton, { backgroundColor: isActive && isPlaying ? "transparent" : colors.accentSoft }]}
         hitSlop={8}
       >
@@ -50,7 +53,13 @@ export const SongRow = ({
         />
       </Pressable>
 
-      <Pressable onPress={onMenuPress} hitSlop={8}>
+      <Pressable
+        onPress={(event) => {
+          event.stopPropagation();
+          onMenuPress?.();
+        }}
+        hitSlop={8}
+      >
         <Ionicons name={showHeart ? "heart-outline" : "ellipsis-vertical"} size={18} color={colors.text} />
       </Pressable>
     </View>
@@ -95,4 +104,3 @@ const styles = StyleSheet.create({
     width: 30,
   },
 });
-

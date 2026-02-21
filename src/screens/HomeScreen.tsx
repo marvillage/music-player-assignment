@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { NavigationProp } from "@react-navigation/native";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -12,9 +12,9 @@ import {
   Text,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { searchAlbums, searchArtists, searchSongs } from "../api/saavn";
+import { getArtistSongs, searchAlbums, searchArtists, searchSongs } from "../api/saavn";
 import { AlbumCard } from "../components/AlbumCard";
 import { AppHeader } from "../components/AppHeader";
 import { ArtistRow } from "../components/ArtistRow";
@@ -44,8 +44,22 @@ const SONG_SORT_OPTIONS: SortOption[] = [
   "Composer",
 ];
 
+const uniqueById = <T extends { id: string }>(items: T[]): T[] => {
+  const seen = new Set<string>();
+  const output: T[] = [];
+  items.forEach((item) => {
+    if (seen.has(item.id)) {
+      return;
+    }
+    seen.add(item.id);
+    output.push(item);
+  });
+  return output;
+};
+
 export const HomeScreen = () => {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
 
   const setQueueAndPlay = usePlayerStore((state) => state.setQueueAndPlay);
@@ -63,8 +77,6 @@ export const HomeScreen = () => {
   const playlists = useLibraryStore((state) => state.playlists);
   const addSongToPlaylist = useLibraryStore((state) => state.addSongToPlaylist);
   const createPlaylist = useLibraryStore((state) => state.createPlaylist);
-  const toggleFollowArtist = useLibraryStore((state) => state.toggleFollowArtist);
-  const isFollowingArtist = useLibraryStore((state) => state.isFollowingArtist);
   const toggleFollowAlbum = useLibraryStore((state) => state.toggleFollowAlbum);
   const isFollowingAlbum = useLibraryStore((state) => state.isFollowingAlbum);
   const recentlyPlayed = useAppStore((state) => state.recentlyPlayed);
@@ -99,6 +111,13 @@ export const HomeScreen = () => {
   const [albumsTotal, setAlbumsTotal] = useState(0);
   const [albumsHasMore, setAlbumsHasMore] = useState(true);
   const [albumsLoading, setAlbumsLoading] = useState(false);
+  const loadingSuggestedRef = useRef(false);
+  const songsLoadingRef = useRef(false);
+  const artistsLoadingRef = useRef(false);
+  const albumsLoadingRef = useRef(false);
+  const songsInitRef = useRef(false);
+  const artistsInitRef = useRef(false);
+  const albumsInitRef = useRef(false);
 
   const downloadedSongs = useMemo(
     () => songs.filter((song) => Boolean(downloaded[song.id])),
@@ -109,89 +128,143 @@ export const HomeScreen = () => {
   const recentList = suggestedSongs.length > 0 ? suggestedSongs : recentlyPlayed;
 
   const loadSuggested = useCallback(async () => {
-    if (loadingSuggested) {
+    if (loadingSuggestedRef.current) {
       return;
     }
+    loadingSuggestedRef.current = true;
     setLoadingSuggested(true);
     try {
-      const [s1, s2, a1] = await Promise.all([
-        searchSongs("anirudh", 1),
-        searchSongs("weeknd", 1),
+      const [globalSongsResult, localSongsResult, mostPlayedSeedResult, globalArtistsResult] = await Promise.allSettled([
+        searchSongs("top hits", 1),
+        searchSongs("english songs", 1),
+        searchSongs("hindi songs", 1),
         searchArtists("popular", 1),
       ]);
-      setSuggestedSongs(s1.items.slice(0, 8));
-      setMostPlayed(s2.items.slice(0, 8));
-      setSuggestedArtists(a1.items.slice(0, 8));
-      cacheSongs([...s1.items, ...s2.items]);
+      const globalSongs = globalSongsResult.status === "fulfilled" ? globalSongsResult.value.items : [];
+      const localSongs = localSongsResult.status === "fulfilled" ? localSongsResult.value.items : [];
+      const mostPlayedSeed = mostPlayedSeedResult.status === "fulfilled" ? mostPlayedSeedResult.value.items : [];
+      const globalArtists = globalArtistsResult.status === "fulfilled" ? globalArtistsResult.value.items : [];
+
+      const mixedSuggested = uniqueById([...globalSongs, ...localSongs]).slice(0, 10);
+      const mixedMostPlayed = uniqueById([...mostPlayedSeed, ...globalSongs, ...localSongs]).slice(0, 10);
+      const fallbackArtistsByName = new Map<string, Artist>();
+      [...mixedSuggested, ...mixedMostPlayed]
+        .filter((song) => song.artist.trim().length > 0)
+        .forEach((song) => {
+          const key = song.artist.toLowerCase();
+          if (fallbackArtistsByName.has(key)) {
+            return;
+          }
+          fallbackArtistsByName.set(key, {
+            id: `derived-${song.id}`,
+            name: song.artist,
+            image: song.image,
+          });
+        });
+      const fallbackArtists = [...fallbackArtistsByName.values()];
+
+      setSuggestedSongs(mixedSuggested.length > 0 ? mixedSuggested : recentlyPlayed.slice(0, 10));
+      setMostPlayed(mixedMostPlayed.length > 0 ? mixedMostPlayed : recentlyPlayed.slice(0, 10));
+      setSuggestedArtists((globalArtists.length > 0 ? globalArtists : fallbackArtists).slice(0, 10));
+      cacheSongs([...mixedSuggested, ...mixedMostPlayed]);
     } finally {
+      loadingSuggestedRef.current = false;
       setLoadingSuggested(false);
     }
-  }, [cacheSongs, loadingSuggested]);
+  }, [cacheSongs, recentlyPlayed]);
 
   const loadSongs = useCallback(
     async (page: number) => {
-      if (songsLoading) {
+      if (songsLoadingRef.current) {
         return;
       }
+      songsLoadingRef.current = true;
       setSongsLoading(true);
       try {
-        const response = await searchSongs("top hindi hits", page);
-        cacheSongs(response.items);
+        const response = await searchSongs("top songs", page);
+        const mergedItems = uniqueById(response.items);
+        cacheSongs(mergedItems);
         setSongsTotal(response.total);
         setSongsHasMore(response.hasMore);
         setSongsPage(page);
-        setSongs((prev) => (page === 1 ? response.items : [...prev, ...response.items]));
+        setSongs((prev) => (page === 1 ? mergedItems : uniqueById([...prev, ...mergedItems])));
       } finally {
+        songsLoadingRef.current = false;
         setSongsLoading(false);
       }
     },
-    [cacheSongs, songsLoading]
+    [cacheSongs]
   );
 
   const loadArtists = useCallback(
     async (page: number) => {
-      if (artistsLoading) {
+      if (artistsLoadingRef.current) {
         return;
       }
+      artistsLoadingRef.current = true;
       setArtistsLoading(true);
       try {
         const response = await searchArtists("popular", page);
+        const mergedItems = uniqueById(response.items);
         setArtistsTotal(response.total);
         setArtistsHasMore(response.hasMore);
         setArtistsPage(page);
-        setArtists((prev) => (page === 1 ? response.items : [...prev, ...response.items]));
+        setArtists((prev) => (page === 1 ? mergedItems : uniqueById([...prev, ...mergedItems])));
       } finally {
+        artistsLoadingRef.current = false;
         setArtistsLoading(false);
       }
     },
-    [artistsLoading]
+    []
   );
 
   const loadAlbums = useCallback(
     async (page: number) => {
-      if (albumsLoading) {
+      if (albumsLoadingRef.current) {
         return;
       }
+      albumsLoadingRef.current = true;
       setAlbumsLoading(true);
       try {
         const response = await searchAlbums("top albums", page);
+        const mergedItems = uniqueById(response.items);
         setAlbumsTotal(response.total);
         setAlbumsHasMore(response.hasMore);
         setAlbumsPage(page);
-        setAlbums((prev) => (page === 1 ? response.items : [...prev, ...response.items]));
+        setAlbums((prev) => (page === 1 ? mergedItems : uniqueById([...prev, ...mergedItems])));
       } finally {
+        albumsLoadingRef.current = false;
         setAlbumsLoading(false);
       }
     },
-    [albumsLoading]
+    []
   );
 
   useEffect(() => {
     void loadSuggested();
-    void loadSongs(1);
-    void loadArtists(1);
-    void loadAlbums(1);
-  }, [loadAlbums, loadArtists, loadSongs, loadSuggested]);
+  }, [loadSuggested]);
+
+  useEffect(() => {
+    if (activeTab === "Songs" && !songsInitRef.current) {
+      songsInitRef.current = true;
+      void loadSongs(1);
+      return;
+    }
+    if (activeTab === "Artists" && !artistsInitRef.current) {
+      artistsInitRef.current = true;
+      void loadArtists(1);
+      return;
+    }
+    if (activeTab === "Albums" && !albumsInitRef.current) {
+      albumsInitRef.current = true;
+      void loadAlbums(1);
+      return;
+    }
+    if (activeTab === "Folders" && !songsInitRef.current) {
+      songsInitRef.current = true;
+      void loadSongs(1);
+    }
+  }, [activeTab, loadAlbums, loadArtists, loadSongs]);
 
   const playFromList = async (list: Song[], index: number) => {
     await setQueueAndPlay(list, index);
@@ -199,6 +272,21 @@ export const HomeScreen = () => {
   };
 
   const isSongActive = (song: Song) => queue[currentIndex]?.id === song.id;
+  const fetchArtistSongs = useCallback(
+    async (artist: Artist): Promise<Song[]> => {
+      try {
+        const response = await getArtistSongs(artist.id, 1);
+        const items = uniqueById(response.items);
+        if (items.length > 0) {
+          cacheSongs(items);
+        }
+        return items;
+      } catch {
+        return [];
+      }
+    },
+    [cacheSongs]
+  );
 
   const songActions = useMemo(() => {
     if (!songSheet) {
@@ -210,13 +298,13 @@ export const HomeScreen = () => {
       {
         id: "next",
         label: "Play Next",
-        icon: "play-skip-forward-outline" as const,
+        icon: "arrow-forward-circle-outline" as const,
         onPress: () => addPlayNext(songSheet),
       },
       {
         id: "queue",
         label: "Add to Playing Queue",
-        icon: "list-circle-outline" as const,
+        icon: "document-text-outline" as const,
         onPress: () => addToQueue(songSheet),
       },
       {
@@ -276,7 +364,7 @@ export const HomeScreen = () => {
       {
         id: "share",
         label: "Share Song",
-        icon: "share-social-outline" as const,
+        icon: "paper-plane-outline" as const,
         onPress: () => {
           void shareSong(songSheet);
         },
@@ -321,30 +409,70 @@ export const HomeScreen = () => {
     if (!artistSheet) {
       return [];
     }
-    const following = isFollowingArtist(artistSheet.id);
     return [
       {
-        id: "follow",
-        label: following ? "Unfollow Artist" : "Follow Artist",
-        icon: following ? ("checkmark-circle-outline" as const) : ("add-circle-outline" as const),
-        onPress: () => toggleFollowArtist(artistSheet.id),
+        id: "play",
+        label: "Play",
+        icon: "play-circle-outline" as const,
+        onPress: () => {
+          void (async () => {
+            const artistSongs = await fetchArtistSongs(artistSheet);
+            if (artistSongs.length > 0) {
+              await setQueueAndPlay(artistSongs, 0);
+              navigation.navigate("Player");
+              return;
+            }
+            navigation.navigate("ArtistDetails", { artist: artistSheet });
+          })();
+        },
       },
       {
-        id: "open",
-        label: "Go to Artist",
-        icon: "person-outline" as const,
-        onPress: () => navigation.navigate("ArtistDetails", { artist: artistSheet }),
+        id: "next",
+        label: "Play Next",
+        icon: "arrow-forward-circle-outline" as const,
+        onPress: () => {
+          void (async () => {
+            const artistSongs = await fetchArtistSongs(artistSheet);
+            if (artistSongs[0]) {
+              addPlayNext(artistSongs[0]);
+            }
+          })();
+        },
+      },
+      {
+        id: "queue",
+        label: "Add to Playing Queue",
+        icon: "document-text-outline" as const,
+        onPress: () => {
+          void (async () => {
+            const artistSongs = await fetchArtistSongs(artistSheet);
+            artistSongs.forEach((song) => addToQueue(song));
+          })();
+        },
+      },
+      {
+        id: "playlist",
+        label: "Add to Playlist",
+        icon: "add-circle-outline" as const,
+        onPress: () => {
+          void (async () => {
+            const artistSongs = await fetchArtistSongs(artistSheet);
+            if (artistSongs[0]) {
+              setPlaylistPickerSong(artistSongs[0]);
+            }
+          })();
+        },
       },
       {
         id: "share",
-        label: "Share Artist",
-        icon: "share-social-outline" as const,
+        label: "Share",
+        icon: "paper-plane-outline" as const,
         onPress: () => {
           void shareArtist(artistSheet);
         },
       },
     ];
-  }, [artistSheet, isFollowingArtist, navigation, toggleFollowArtist]);
+  }, [addPlayNext, addToQueue, artistSheet, fetchArtistSongs, navigation, setQueueAndPlay]);
 
   const albumActions = useMemo(() => {
     if (!albumSheet) {
@@ -446,7 +574,7 @@ export const HomeScreen = () => {
           <Text style={[styles.count, { color: colors.text }]}>{songsTotal || songs.length} songs</Text>
           <Pressable onPress={() => setSortVisible(true)} style={styles.sortRow}>
             <Text style={[styles.sortText, { color: colors.accent }]}>{songSort}</Text>
-            <Ionicons name="swap-vertical-outline" size={16} color={colors.accent} />
+            <Ionicons name="swap-vertical" size={16} color={colors.accent} />
           </Pressable>
         </View>
       }
@@ -583,7 +711,10 @@ export const HomeScreen = () => {
   };
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]} edges={["top"]}>
+    <SafeAreaView
+      style={[styles.safe, { backgroundColor: colors.background, paddingTop: Math.max(insets.top, 10) }]}
+      edges={["left", "right", "bottom"]}
+    >
       <AppHeader colors={colors} onSearchPress={() => navigation.navigate("Search")} />
       <TopCategoryTabs items={HOME_TABS} active={activeTab} onChange={setActiveTab} colors={colors} />
 
@@ -602,8 +733,8 @@ export const HomeScreen = () => {
         actions={SONG_SORT_OPTIONS.map((option) => ({
           id: option,
           label: option,
-          icon: "radio-button-off-outline",
           active: option === songSort,
+          showRadio: true,
           onPress: () => setSongSort(option),
         }))}
       />
@@ -634,7 +765,7 @@ export const HomeScreen = () => {
         colors={colors}
         image={artistSheet?.image}
         title={artistSheet?.name}
-        subtitle={artistSheet ? `${artistSheet.songCount ?? 0} songs` : undefined}
+        subtitle={artistSheet ? `${artistSheet.albumCount ?? 0} Album   |   ${artistSheet.songCount ?? 0} Songs` : undefined}
         actions={artistActions}
       />
 
@@ -664,6 +795,7 @@ const styles = StyleSheet.create({
   },
   hRow: {
     gap: 14,
+    paddingRight: 20,
   },
   squareItem: {
     width: 168,

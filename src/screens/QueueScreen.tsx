@@ -1,10 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { NavigationProp } from "@react-navigation/native";
+import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import DraggableFlatList, { ScaleDecorator } from "react-native-draggable-flatlist";
 
+import { ConfirmModal } from "../components/ConfirmModal";
 import { EmptyState } from "../components/EmptyState";
 import { useTheme } from "../hooks/useTheme";
 import type { RootStackParamList } from "../navigation/types";
@@ -15,6 +17,7 @@ import { formatDurationLabel } from "../utils/format";
 export const QueueScreen = () => {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const { colors } = useTheme();
+  const [clearQueueConfirmVisible, setClearQueueConfirmVisible] = useState(false);
 
   const queue = usePlayerStore((state) => state.queue);
   const currentIndex = usePlayerStore((state) => state.currentIndex);
@@ -22,6 +25,7 @@ export const QueueScreen = () => {
   const removeFromQueue = usePlayerStore((state) => state.removeFromQueue);
   const playFromQueue = usePlayerStore((state) => state.playFromQueue);
   const clearQueue = usePlayerStore((state) => state.clearQueue);
+  const confirmClearQueue = () => setClearQueueConfirmVisible(true);
 
   if (queue.length === 0) {
     return (
@@ -45,7 +49,7 @@ export const QueueScreen = () => {
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </Pressable>
         <Text style={[styles.title, { color: colors.text }]}>Playing Queue</Text>
-        <Pressable onPress={() => void clearQueue()}>
+        <Pressable onPress={confirmClearQueue}>
           <Text style={[styles.clear, { color: colors.danger }]}>Clear</Text>
         </Pressable>
       </View>
@@ -100,6 +104,18 @@ export const QueueScreen = () => {
             </Pressable>
           </ScaleDecorator>
         )}
+      />
+
+      <ConfirmModal
+        visible={clearQueueConfirmVisible}
+        title="Clear Queue"
+        message="Are you sure you want to clear the playing queue?"
+        colors={colors}
+        onCancel={() => setClearQueueConfirmVisible(false)}
+        onConfirm={() => {
+          void clearQueue();
+          setClearQueueConfirmVisible(false);
+        }}
       />
     </SafeAreaView>
   );

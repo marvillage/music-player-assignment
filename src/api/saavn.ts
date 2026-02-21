@@ -1,10 +1,15 @@
 import type { Album, Artist, PaginatedResult, Song } from "../types/music";
+import { Platform } from "react-native";
 import { pickBestImage } from "../utils/image";
 
-const BASE_URL = "https://saavn.sumit.co";
+const BASE_URL = Platform.OS === "web" ? "http://localhost:8787" : "https://saavn.sumit.co";
 const PAGE_SIZE = 20;
+const MAX_RETRIES = 2;
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
 
 type AnyObject = Record<string, any>;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const toNumber = (value: unknown): number => {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -23,7 +28,6 @@ const extractArtistName = (raw: AnyObject): string => {
   if (typeof raw.primaryArtists === "string" && raw.primaryArtists.trim().length > 0) {
     return raw.primaryArtists;
   }
-
   const primary = raw.artists?.primary;
   if (Array.isArray(primary) && primary.length > 0) {
     return primary.map((item: AnyObject) => item?.name).filter(Boolean).join(", ");
@@ -115,11 +119,38 @@ const fetchJson = async (path: string, params: Record<string, string | number | 
     }
   });
 
-  const response = await fetch(url.toString());
-  if (!response.ok) {
-    throw new Error(`API error ${response.status}`);
+  let lastError = "Unknown error";
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+    try {
+      const response = await fetch(url.toString(), {
+        headers: { accept: "application/json" },
+      });
+
+      if (response.ok) {
+        return (await response.json()) as AnyObject;
+      }
+
+      lastError = `API error ${response.status}`;
+      if (attempt < MAX_RETRIES && RETRYABLE_STATUS.has(response.status)) {
+        await sleep(400 * (attempt + 1));
+        continue;
+      }
+      throw new Error(lastError);
+    } catch (error) {
+      lastError = String(error);
+      if (attempt < MAX_RETRIES) {
+        await sleep(350 * (attempt + 1));
+        continue;
+      }
+      const proxyHint =
+        Platform.OS === "web"
+          ? " For web, run `npm run saavn-proxy` in another terminal."
+          : "";
+      throw new Error(`${lastError}${proxyHint}`);
+    }
   }
-  return (await response.json()) as AnyObject;
+
+  throw new Error(lastError);
 };
 
 export const searchSongs = async (query: string, page = 1): Promise<PaginatedResult<Song>> => {
@@ -197,4 +228,3 @@ export const getAlbumSongs = async (album: Album): Promise<Song[]> => {
     return song.albumId === album.id || song.albumName?.toLowerCase() === album.name.toLowerCase();
   });
 };
-

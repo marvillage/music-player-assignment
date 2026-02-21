@@ -12,12 +12,13 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { searchAlbums, searchArtists, searchSongs } from "../api/saavn";
+import { getArtistSongs, searchAlbums, searchArtists, searchSongs } from "../api/saavn";
 import { AlbumCard } from "../components/AlbumCard";
 import { ArtistRow } from "../components/ArtistRow";
 import { BottomSheet } from "../components/BottomSheet";
+import { ConfirmModal } from "../components/ConfirmModal";
 import { EmptyState } from "../components/EmptyState";
 import { SongRow } from "../components/SongRow";
 import { useTheme } from "../hooks/useTheme";
@@ -26,7 +27,7 @@ import { useAppStore } from "../stores/appStore";
 import { useLibraryStore } from "../stores/libraryStore";
 import { usePlayerStore } from "../stores/playerStore";
 import type { Album, Artist, Song } from "../types/music";
-import { shareSong } from "../utils/share";
+import { shareArtist, shareSong } from "../utils/share";
 
 const CATEGORIES = ["Songs", "Artists", "Albums", "Folders"] as const;
 type SearchCategory = (typeof CATEGORIES)[number];
@@ -107,6 +108,7 @@ const includeByDuration = (song: Song, filter: DurationFilter): boolean => {
 export const SearchScreen = () => {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
 
   const recentSearches = useAppStore((state) => state.recentSearches);
   const addRecentSearch = useAppStore((state) => state.addRecentSearch);
@@ -139,6 +141,8 @@ export const SearchScreen = () => {
   const [didYouMean, setDidYouMean] = useState<string | null>(null);
   const [songSheet, setSongSheet] = useState<Song | null>(null);
   const [playlistPickerSong, setPlaylistPickerSong] = useState<Song | null>(null);
+  const [artistSheet, setArtistSheet] = useState<Artist | null>(null);
+  const [clearSearchConfirmVisible, setClearSearchConfirmVisible] = useState(false);
 
   const trendingQueries = useMemo(() => {
     const tracked = topSearches(8);
@@ -206,6 +210,20 @@ export const SearchScreen = () => {
     }
   };
 
+  const fetchArtistSongs = async (artist: Artist): Promise<Song[]> => {
+    try {
+      const response = await getArtistSongs(artist.id, 1);
+      if (response.items.length > 0) {
+        cacheSongs(response.items);
+      }
+      return response.items;
+    } catch {
+      return [];
+    }
+  };
+
+  const confirmClearSearchHistory = () => setClearSearchConfirmVisible(true);
+
   const songActions = useMemo(() => {
     if (!songSheet) {
       return [];
@@ -216,13 +234,13 @@ export const SearchScreen = () => {
       {
         id: "next",
         label: "Play Next",
-        icon: "play-skip-forward-outline" as const,
+        icon: "arrow-forward-circle-outline" as const,
         onPress: () => addPlayNext(songSheet),
       },
       {
         id: "queue",
         label: "Add to Playing Queue",
-        icon: "list-circle-outline" as const,
+        icon: "document-text-outline" as const,
         onPress: () => addToQueue(songSheet),
       },
       {
@@ -252,7 +270,7 @@ export const SearchScreen = () => {
       {
         id: "share",
         label: "Share Song",
-        icon: "share-social-outline" as const,
+        icon: "paper-plane-outline" as const,
         onPress: () => {
           void shareSong(songSheet);
         },
@@ -282,6 +300,75 @@ export const SearchScreen = () => {
       })),
     ];
   }, [addSongToPlaylist, createPlaylist, playlistPickerSong, playlists]);
+
+  const artistActions = useMemo(() => {
+    if (!artistSheet) {
+      return [];
+    }
+    return [
+      {
+        id: "play",
+        label: "Play",
+        icon: "play-circle-outline" as const,
+        onPress: () => {
+          void (async () => {
+            const artistSongs = await fetchArtistSongs(artistSheet);
+            if (artistSongs.length > 0) {
+              await setQueueAndPlay(artistSongs, 0);
+              navigation.navigate("Player");
+              return;
+            }
+            navigation.navigate("ArtistDetails", { artist: artistSheet });
+          })();
+        },
+      },
+      {
+        id: "next",
+        label: "Play Next",
+        icon: "arrow-forward-circle-outline" as const,
+        onPress: () => {
+          void (async () => {
+            const artistSongs = await fetchArtistSongs(artistSheet);
+            if (artistSongs[0]) {
+              addPlayNext(artistSongs[0]);
+            }
+          })();
+        },
+      },
+      {
+        id: "queue",
+        label: "Add to Playing Queue",
+        icon: "document-text-outline" as const,
+        onPress: () => {
+          void (async () => {
+            const artistSongs = await fetchArtistSongs(artistSheet);
+            artistSongs.forEach((song) => addToQueue(song));
+          })();
+        },
+      },
+      {
+        id: "playlist",
+        label: "Add to Playlist",
+        icon: "add-circle-outline" as const,
+        onPress: () => {
+          void (async () => {
+            const artistSongs = await fetchArtistSongs(artistSheet);
+            if (artistSongs[0]) {
+              setPlaylistPickerSong(artistSongs[0]);
+            }
+          })();
+        },
+      },
+      {
+        id: "share",
+        label: "Share",
+        icon: "paper-plane-outline" as const,
+        onPress: () => {
+          void shareArtist(artistSheet);
+        },
+      },
+    ];
+  }, [addPlayNext, addToQueue, artistSheet, fetchArtistSongs, navigation, setQueueAndPlay]);
 
   const renderSongFilters = () => (
     <View style={styles.filtersWrap}>
@@ -326,7 +413,7 @@ export const SearchScreen = () => {
     <View style={styles.recentWrap}>
       <View style={[styles.recentHeader, { borderBottomColor: colors.border }]}>
         <Text style={[styles.recentTitle, { color: colors.text }]}>Recent Searches</Text>
-        <Pressable onPress={clearRecentSearches}>
+        <Pressable onPress={confirmClearSearchHistory}>
           <Text style={[styles.clear, { color: colors.accent }]}>Clear All</Text>
         </Pressable>
       </View>
@@ -452,6 +539,7 @@ export const SearchScreen = () => {
                 submitSearch();
                 navigation.navigate("ArtistDetails", { artist: item });
               }}
+              onMenuPress={() => setArtistSheet(item)}
             />
           )}
           contentContainerStyle={styles.bottomPad}
@@ -495,7 +583,10 @@ export const SearchScreen = () => {
   };
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]} edges={["top"]}>
+    <SafeAreaView
+      style={[styles.safe, { backgroundColor: colors.background, paddingTop: Math.max(insets.top, 10) }]}
+      edges={["left", "right", "bottom"]}
+    >
       <View style={styles.searchRow}>
         <Pressable onPress={() => navigation.goBack()} style={styles.back}>
           <Ionicons name="arrow-back" size={23} color={colors.text} />
@@ -560,6 +651,28 @@ export const SearchScreen = () => {
         title="Add to Playlist"
         subtitle={playlistPickerSong ? `${playlistPickerSong.title} - ${playlistPickerSong.artist}` : undefined}
         actions={playlistActions}
+      />
+
+      <BottomSheet
+        visible={Boolean(artistSheet)}
+        onClose={() => setArtistSheet(null)}
+        colors={colors}
+        image={artistSheet?.image}
+        title={artistSheet?.name}
+        subtitle={artistSheet ? `${artistSheet.albumCount ?? 0} Album   |   ${artistSheet.songCount ?? 0} Songs` : undefined}
+        actions={artistActions}
+      />
+
+      <ConfirmModal
+        visible={clearSearchConfirmVisible}
+        title="Clear Search History"
+        message="Are you sure you want to clear search history?"
+        colors={colors}
+        onCancel={() => setClearSearchConfirmVisible(false)}
+        onConfirm={() => {
+          clearRecentSearches();
+          setClearSearchConfirmVisible(false);
+        }}
       />
     </SafeAreaView>
   );

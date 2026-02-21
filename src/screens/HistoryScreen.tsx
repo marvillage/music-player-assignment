@@ -1,9 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { NavigationProp } from "@react-navigation/native";
+import { useState } from "react";
 import { FlatList, Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { ConfirmModal } from "../components/ConfirmModal";
 import { EmptyState } from "../components/EmptyState";
 import { useTheme } from "../hooks/useTheme";
 import type { RootStackParamList } from "../navigation/types";
@@ -19,6 +21,7 @@ const formatPlayedAt = (timestamp: number): string => {
 export const HistoryScreen = () => {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const { colors } = useTheme();
+  const [clearHistoryConfirmVisible, setClearHistoryConfirmVisible] = useState(false);
 
   const playbackHistory = useAppStore((state) => state.playbackHistory);
   const clearPlaybackHistory = useAppStore((state) => state.clearPlaybackHistory);
@@ -29,6 +32,8 @@ export const HistoryScreen = () => {
     .map((entry) => ({ ...entry, song: songCache[entry.songId] }))
     .filter((entry) => Boolean(entry.song));
 
+  const confirmClearHistory = () => setClearHistoryConfirmVisible(true);
+
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]} edges={["top"]}>
       <View style={styles.header}>
@@ -36,7 +41,7 @@ export const HistoryScreen = () => {
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </Pressable>
         <Text style={[styles.title, { color: colors.text }]}>Listening History</Text>
-        <Pressable onPress={clearPlaybackHistory}>
+        <Pressable onPress={confirmClearHistory}>
           <Text style={[styles.clear, { color: colors.danger }]}>Clear</Text>
         </Pressable>
       </View>
@@ -76,6 +81,18 @@ export const HistoryScreen = () => {
           )}
         />
       )}
+
+      <ConfirmModal
+        visible={clearHistoryConfirmVisible}
+        title="Clear Listening History"
+        message="Are you sure you want to clear listening history?"
+        colors={colors}
+        onCancel={() => setClearHistoryConfirmVisible(false)}
+        onConfirm={() => {
+          clearPlaybackHistory();
+          setClearHistoryConfirmVisible(false);
+        }}
+      />
     </SafeAreaView>
   );
 };

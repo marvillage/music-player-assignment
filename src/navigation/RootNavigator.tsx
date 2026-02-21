@@ -25,11 +25,20 @@ import { HistoryScreen } from "../screens/HistoryScreen";
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
-const ICONS: Record<keyof MainTabParamList, keyof typeof Ionicons.glyphMap> = {
-  Home: "home",
-  Favorites: "heart-outline",
-  Playlists: "list",
-  Settings: "settings-outline",
+const getTabIcon = (
+  route: keyof MainTabParamList,
+  focused: boolean
+): keyof typeof Ionicons.glyphMap => {
+  if (route === "Home") {
+    return focused ? "home" : "home-outline";
+  }
+  if (route === "Favorites") {
+    return focused ? "heart" : "heart-outline";
+  }
+  if (route === "Playlists") {
+    return "document-text-outline";
+  }
+  return focused ? "settings" : "settings-outline";
 };
 
 type MainTabsProps = NativeStackScreenProps<RootStackParamList, "MainTabs">;
@@ -55,7 +64,7 @@ const MainTabs = ({ navigation }: MainTabsProps) => {
             position: "absolute",
           },
           tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons name={ICONS[route.name]} color={color} size={focused ? size + 1 : size} />
+            <Ionicons name={getTabIcon(route.name, focused)} color={color} size={focused ? size + 1 : size} />
           ),
           tabBarBackground: () => (
             <BlurView

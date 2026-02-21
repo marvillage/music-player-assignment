@@ -3,7 +3,7 @@ import { useNavigation } from "@react-navigation/native";
 import type { NavigationProp } from "@react-navigation/native";
 import { useMemo, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../components/BottomSheet";
 import type { SheetAction } from "../components/BottomSheet";
@@ -16,6 +16,7 @@ import { sharePlaylist } from "../utils/share";
 
 export const PlaylistsScreen = () => {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const playlists = useLibraryStore((state) => state.playlists);
   const favoritesCount = useLibraryStore((state) => state.favorites.length);
@@ -123,7 +124,7 @@ export const PlaylistsScreen = () => {
   }, [deletePlaylist, favoritesCount, playlistMenu]);
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]} edges={["top"]}>
+    <SafeAreaView style={[styles.safe, { backgroundColor: colors.background, paddingTop: Math.max(insets.top, 10) }]} edges={["left", "right", "bottom"]}>
       <View style={styles.header}>
         <Text style={[styles.title, { color: colors.text }]}>Playlists</Text>
         <Pressable onPress={openCreateModal} style={[styles.createButton, { backgroundColor: colors.accent }]}>

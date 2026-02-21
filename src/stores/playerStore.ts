@@ -16,6 +16,7 @@ type PlayerState = {
   isPlaying: boolean;
   durationSec: number;
   positionSec: number;
+  playbackRate: number;
   repeatMode: RepeatMode;
   shuffleEnabled: boolean;
   sleepTimerEndsAt: number | null;
@@ -38,6 +39,8 @@ type PlayerState = {
   moveQueueItem: (from: number, to: number) => void;
   removeFromQueue: (index: number) => Promise<void>;
   clearQueue: () => Promise<void>;
+  setPlaybackRate: (rate: number) => Promise<void>;
+  cyclePlaybackRate: () => Promise<void>;
   toggleShuffle: () => void;
   cycleRepeatMode: () => void;
   setSleepTimer: (minutes: number) => void;
@@ -87,6 +90,7 @@ export const usePlayerStore = create<PlayerState>()(
       isPlaying: false,
       durationSec: 0,
       positionSec: 0,
+      playbackRate: 1,
       repeatMode: "off",
       shuffleEnabled: false,
       sleepTimerEndsAt: null,
@@ -155,6 +159,8 @@ export const usePlayerStore = create<PlayerState>()(
             shouldPlay,
             positionMillis: 0,
             progressUpdateIntervalMillis: 400,
+            rate: state.playbackRate,
+            shouldCorrectPitch: true,
           },
           (playbackStatus) => {
             if (!playbackStatus.isLoaded) {
@@ -333,6 +339,27 @@ export const usePlayerStore = create<PlayerState>()(
           sound: null,
         });
       },
+      setPlaybackRate: async (rate) => {
+        if (!Number.isFinite(rate) || rate <= 0) {
+          return;
+        }
+        const sound = get().sound;
+        if (sound) {
+          try {
+            await sound.setRateAsync(rate, true);
+          } catch {
+            // no-op
+          }
+        }
+        set({ playbackRate: rate });
+      },
+      cyclePlaybackRate: async () => {
+        const rates = [0.75, 1, 1.25, 1.5];
+        const state = get();
+        const currentIndex = rates.findIndex((rate) => Math.abs(rate - state.playbackRate) < 0.001);
+        const nextRate = rates[(currentIndex + 1) % rates.length];
+        await get().setPlaybackRate(nextRate);
+      },
       toggleShuffle: () => set((state) => ({ shuffleEnabled: !state.shuffleEnabled })),
       cycleRepeatMode: () =>
         set((state) => ({
@@ -382,6 +409,7 @@ export const usePlayerStore = create<PlayerState>()(
       partialize: (state) => ({
         queue: state.queue,
         currentIndex: state.currentIndex,
+        playbackRate: state.playbackRate,
         repeatMode: state.repeatMode,
         shuffleEnabled: state.shuffleEnabled,
       }),

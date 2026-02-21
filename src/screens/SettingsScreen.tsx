@@ -1,8 +1,10 @@
 import { useNavigation } from "@react-navigation/native";
 import type { NavigationProp } from "@react-navigation/native";
+import { useState } from "react";
 import { Pressable, StyleSheet, Switch, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { ConfirmModal } from "../components/ConfirmModal";
 import { useTheme } from "../hooks/useTheme";
 import type { RootStackParamList } from "../navigation/types";
 import { useAppStore } from "../stores/appStore";
@@ -10,14 +12,24 @@ import { usePlayerStore } from "../stores/playerStore";
 
 export const SettingsScreen = () => {
   const { colors, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
+  const [confirmSearchVisible, setConfirmSearchVisible] = useState(false);
+  const [confirmQueueVisible, setConfirmQueueVisible] = useState(false);
+  const [confirmHistoryVisible, setConfirmHistoryVisible] = useState(false);
   const toggleTheme = useAppStore((state) => state.toggleTheme);
   const clearRecentSearches = useAppStore((state) => state.clearRecentSearches);
   const clearPlaybackHistory = useAppStore((state) => state.clearPlaybackHistory);
   const clearQueue = usePlayerStore((state) => state.clearQueue);
+  const confirmClearSearchHistory = () => setConfirmSearchVisible(true);
+  const confirmClearQueue = () => setConfirmQueueVisible(true);
+  const confirmClearListeningHistory = () => setConfirmHistoryVisible(true);
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]} edges={["top"]}>
+    <SafeAreaView
+      style={[styles.safe, { backgroundColor: colors.background, paddingTop: Math.max(insets.top, 10) }]}
+      edges={["left", "right", "bottom"]}
+    >
       <Text style={[styles.title, { color: colors.text }]}>Settings</Text>
 
       <View style={[styles.row, { borderColor: colors.border, backgroundColor: colors.surface }]}>
@@ -33,14 +45,14 @@ export const SettingsScreen = () => {
         />
       </View>
 
-      <Pressable style={[styles.row, { borderColor: colors.border, backgroundColor: colors.surface }]} onPress={clearRecentSearches}>
+      <Pressable style={[styles.row, { borderColor: colors.border, backgroundColor: colors.surface }]} onPress={confirmClearSearchHistory}>
         <View>
           <Text style={[styles.rowTitle, { color: colors.text }]}>Clear Search History</Text>
           <Text style={[styles.rowMeta, { color: colors.textSecondary }]}>Remove recent search suggestions</Text>
         </View>
       </Pressable>
 
-      <Pressable style={[styles.row, { borderColor: colors.border, backgroundColor: colors.surface }]} onPress={() => void clearQueue()}>
+      <Pressable style={[styles.row, { borderColor: colors.border, backgroundColor: colors.surface }]} onPress={confirmClearQueue}>
         <View>
           <Text style={[styles.rowTitle, { color: colors.text }]}>Clear Queue</Text>
           <Text style={[styles.rowMeta, { color: colors.textSecondary }]}>Stop playback and remove queued songs</Text>
@@ -54,12 +66,48 @@ export const SettingsScreen = () => {
         </View>
       </Pressable>
 
-      <Pressable style={[styles.row, { borderColor: colors.border, backgroundColor: colors.surface }]} onPress={clearPlaybackHistory}>
+      <Pressable style={[styles.row, { borderColor: colors.border, backgroundColor: colors.surface }]} onPress={confirmClearListeningHistory}>
         <View>
           <Text style={[styles.rowTitle, { color: colors.text }]}>Clear Listening History</Text>
           <Text style={[styles.rowMeta, { color: colors.textSecondary }]}>Remove your playback timeline data</Text>
         </View>
       </Pressable>
+
+      <ConfirmModal
+        visible={confirmSearchVisible}
+        title="Clear Search History"
+        message="Are you sure you want to clear search history?"
+        colors={colors}
+        onCancel={() => setConfirmSearchVisible(false)}
+        onConfirm={() => {
+          clearRecentSearches();
+          setConfirmSearchVisible(false);
+        }}
+      />
+
+      <ConfirmModal
+        visible={confirmQueueVisible}
+        title="Clear Queue"
+        message="Are you sure you want to clear the queue?"
+        colors={colors}
+        onCancel={() => setConfirmQueueVisible(false)}
+        onConfirm={() => {
+          void clearQueue();
+          setConfirmQueueVisible(false);
+        }}
+      />
+
+      <ConfirmModal
+        visible={confirmHistoryVisible}
+        title="Clear Listening History"
+        message="Are you sure you want to clear listening history?"
+        colors={colors}
+        onCancel={() => setConfirmHistoryVisible(false)}
+        onConfirm={() => {
+          clearPlaybackHistory();
+          setConfirmHistoryVisible(false);
+        }}
+      />
     </SafeAreaView>
   );
 };

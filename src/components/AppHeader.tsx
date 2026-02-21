@@ -12,7 +12,7 @@ export const AppHeader = ({ colors, onSearchPress }: Props) => (
   <View style={styles.container}>
     <View style={styles.left}>
       <Ionicons name="musical-notes" size={30} color={colors.accent} />
-      <Text style={[styles.title, { color: colors.text }]}>Lokal_Music</Text>
+      <Text style={[styles.title, { color: colors.text }]}>Mume</Text>
     </View>
     <Pressable onPress={onSearchPress} hitSlop={10}>
       <Ionicons name="search" size={28} color={colors.text} />

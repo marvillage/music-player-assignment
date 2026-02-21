@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Lokal_Music",
-    "slug": "lokal-music",
+    "name": "Mume",
+    "slug": "mume",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -16,6 +16,7 @@
       "supportsTablet": true,
       "infoPlist": {
         "UIBackgroundModes": [
+          "audio",
           "audio"
         ]
       }
@@ -28,6 +29,10 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
+        "WAKE_LOCK",
+        "FOREGROUND_SERVICE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
         "WAKE_LOCK",
         "FOREGROUND_SERVICE",
         "android.permission.RECORD_AUDIO",
@@ -46,6 +51,12 @@
       "eas": {
         "projectId": "d2621a9a-73ef-4d4f-b387-84b913c50b56"
       }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/d2621a9a-73ef-4d4f-b387-84b913c50b56"
     }
   }
 }

@@ -102,64 +102,49 @@ export const ArtistDetailsScreen = () => {
     if (songs.length === 0) {
       return [];
     }
-    const following = isFollowingArtist(artist.id);
     return [
       {
         id: "play",
-        label: "Play Songs",
-        icon: "play-outline" as const,
+        label: "Play",
+        icon: "play-circle-outline" as const,
         onPress: () => playAndOpenPlayer(songs, 0),
       },
       {
-        id: "shuffle",
-        label: "Shuffle Play",
-        icon: "shuffle-outline" as const,
-        onPress: shuffleAndPlay,
+        id: "next",
+        label: "Play Next",
+        icon: "arrow-forward-circle-outline" as const,
+        onPress: () => {
+          if (songs[0]) {
+            addPlayNext(songs[0]);
+          }
+        },
       },
       {
         id: "queue-all",
-        label: "Add Songs to Queue",
-        icon: "list-circle-outline" as const,
+        label: "Add to Playing Queue",
+        icon: "document-text-outline" as const,
         onPress: () => songs.forEach((song) => addToQueue(song)),
       },
       {
-        id: "download-all",
-        label: "Download All Songs",
-        icon: "download-outline" as const,
-        onPress: () =>
-          songs.forEach((song) => {
-            if (!downloaded[song.id]) {
-              void downloadSong(song);
-            }
-          }),
-      },
-      {
-        id: "favorite-all",
-        label: "Add All to Favorites",
-        icon: "heart-outline" as const,
-        onPress: () =>
-          songs.forEach((song) => {
-            if (!isFavorite(song.id)) {
-              toggleFavorite(song);
-            }
-          }),
-      },
-      {
-        id: "follow-artist",
-        label: following ? "Unfollow Artist" : "Follow Artist",
-        icon: following ? ("checkmark-circle-outline" as const) : ("add-circle-outline" as const),
-        onPress: () => toggleFollowArtist(artist.id),
+        id: "playlist",
+        label: "Add to Playlist",
+        icon: "add-circle-outline" as const,
+        onPress: () => {
+          if (songs[0]) {
+            setPlaylistPickerSong(songs[0]);
+          }
+        },
       },
       {
         id: "share-artist",
-        label: "Share Artist",
-        icon: "share-social-outline" as const,
+        label: "Share",
+        icon: "paper-plane-outline" as const,
         onPress: () => {
           void shareArtist(artist);
         },
       },
     ];
-  }, [addToQueue, artist, downloadSong, downloaded, isFavorite, isFollowingArtist, songs, toggleFavorite, toggleFollowArtist]);
+  }, [addPlayNext, addToQueue, artist, songs]);
 
   const songActions = useMemo(() => {
     if (!songSheet) {
@@ -171,13 +156,13 @@ export const ArtistDetailsScreen = () => {
       {
         id: "next",
         label: "Play Next",
-        icon: "play-skip-forward-outline" as const,
+        icon: "arrow-forward-circle-outline" as const,
         onPress: () => addPlayNext(songSheet),
       },
       {
         id: "queue",
         label: "Add to Playing Queue",
-        icon: "list-circle-outline" as const,
+        icon: "document-text-outline" as const,
         onPress: () => addToQueue(songSheet),
       },
       {
@@ -235,7 +220,7 @@ export const ArtistDetailsScreen = () => {
       {
         id: "share-song",
         label: "Share Song",
-        icon: "share-social-outline" as const,
+        icon: "paper-plane-outline" as const,
         onPress: () => {
           void shareSong(songSheet);
         },
@@ -368,7 +353,7 @@ export const ArtistDetailsScreen = () => {
         colors={colors}
         image={artist.image}
         title={artist.name}
-        subtitle={`${songs.length} songs`}
+        subtitle={`${artist.albumCount ?? 0} Album   |   ${songs.length} Songs`}
         actions={artistActions}
       />
 
