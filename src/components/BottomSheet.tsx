@@ -1,5 +1,6 @@
+import { useEffect } from "react";
 import { Ionicons } from "@expo/vector-icons";
-import { Image, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import type { ThemeColors } from "../constants/theme";
 
@@ -22,45 +23,62 @@ type Props = {
   onClose: () => void;
 };
 
-export const BottomSheet = ({ visible, title, subtitle, image, colors, actions, onClose }: Props) => (
-  <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-    <Pressable style={[styles.overlay, { backgroundColor: colors.overlay }]} onPress={onClose} />
-    <View style={[styles.sheet, { backgroundColor: colors.surface }]}>
-      <View style={[styles.grabber, { backgroundColor: colors.border }]} />
-      {(title || subtitle) && (
-        <View style={[styles.header, { borderBottomColor: colors.border }]}>
-          {image ? <Image source={{ uri: image }} style={styles.image} /> : null}
-          <View style={styles.headerText}>
-            {title ? <Text style={[styles.title, { color: colors.text }]}>{title}</Text> : null}
-            {subtitle ? <Text style={[styles.subtitle, { color: colors.textSecondary }]}>{subtitle}</Text> : null}
+export const BottomSheet = ({ visible, title, subtitle, image, colors, actions, onClose }: Props) => {
+  useEffect(() => {
+    if (!visible || Platform.OS !== "web") {
+      return;
+    }
+    const activeElement = (globalThis as any)?.document?.activeElement as { blur?: () => void } | null;
+    activeElement?.blur?.();
+  }, [visible]);
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={[styles.overlay, { backgroundColor: colors.overlay }]} onPress={onClose} />
+      <View style={[styles.sheet, { backgroundColor: colors.surface }]}>
+        <View style={[styles.grabber, { backgroundColor: colors.border }]} />
+        {(title || subtitle) && (
+          <View style={[styles.header, { borderBottomColor: colors.border }]}>
+            {image ? <Image source={{ uri: image }} style={styles.image} /> : null}
+            <View style={styles.headerText}>
+              {title ? <Text style={[styles.title, { color: colors.text }]}>{title}</Text> : null}
+              {subtitle ? <Text style={[styles.subtitle, { color: colors.textSecondary }]}>{subtitle}</Text> : null}
+            </View>
           </View>
-        </View>
-      )}
-      {actions.map((action) => (
-        <Pressable
-          key={action.id}
-          onPress={() => {
-            action.onPress();
-            onClose();
-          }}
-          style={[styles.actionRow, { borderBottomColor: colors.border }]}
+        )}
+        <ScrollView
+          style={styles.actionsScroll}
+          contentContainerStyle={styles.actionsContent}
+          showsVerticalScrollIndicator={false}
+          bounces
         >
-          {action.icon ? <Ionicons name={action.icon} size={23} color={action.active ? colors.accent : colors.text} /> : <View style={styles.actionSpacer} />}
-          <Text style={[styles.actionLabel, { color: action.active ? colors.accent : colors.text }]}>
-            {action.label}
-          </Text>
-          {action.showRadio ? (
-            <Ionicons
-              name={action.active ? "radio-button-on" : "radio-button-off"}
-              size={21}
-              color={colors.accent}
-            />
-          ) : null}
-        </Pressable>
-      ))}
-    </View>
-  </Modal>
-);
+          {actions.map((action) => (
+            <Pressable
+              key={action.id}
+              onPress={() => {
+                action.onPress();
+                onClose();
+              }}
+              style={[styles.actionRow, { borderBottomColor: colors.border }]}
+            >
+              {action.icon ? <Ionicons name={action.icon} size={23} color={action.active ? colors.accent : colors.text} /> : <View style={styles.actionSpacer} />}
+              <Text style={[styles.actionLabel, { color: action.active ? colors.accent : colors.text }]}>
+                {action.label}
+              </Text>
+              {action.showRadio ? (
+                <Ionicons
+                  name={action.active ? "radio-button-on" : "radio-button-off"}
+                  size={21}
+                  color={colors.accent}
+                />
+              ) : null}
+            </Pressable>
+          ))}
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+};
 
 const styles = StyleSheet.create({
   overlay: {
@@ -76,6 +94,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     maxHeight: "82%",
+    overflow: "hidden",
     paddingBottom: 20,
     position: "absolute",
     right: 0,
@@ -103,6 +122,13 @@ const styles = StyleSheet.create({
   },
   headerText: {
     flex: 1,
+  },
+  actionsScroll: {
+    flexGrow: 1,
+    minHeight: 0,
+  },
+  actionsContent: {
+    paddingBottom: 10,
   },
   title: {
     fontFamily: "Poppins_600SemiBold",

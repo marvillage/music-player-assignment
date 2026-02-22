@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View, Image } from "react-native";
 
 import type { ThemeColors } from "../constants/theme";
 import { usePlayerStore } from "../stores/playerStore";
+import { formatSongByline } from "../utils/display";
 
 type Props = {
   colors: ThemeColors;
@@ -23,7 +24,7 @@ export const MiniPlayer = ({ colors, onOpen }: Props) => {
     <Pressable onPress={onOpen} style={[styles.container, { backgroundColor: colors.surface, borderColor: colors.border }]}>
       <Image source={{ uri: song.image }} style={styles.cover} />
       <Text numberOfLines={1} style={[styles.title, { color: colors.text }]}>
-        {song.title} - {song.artist}
+        {formatSongByline(song.title, song.artist)}
       </Text>
       <Pressable
         onPress={(event) => {
@@ -71,4 +72,3 @@ const styles = StyleSheet.create({
     marginLeft: 6,
   },
 });
-

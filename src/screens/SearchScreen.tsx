@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -27,6 +28,8 @@ import { useAppStore } from "../stores/appStore";
 import { useLibraryStore } from "../stores/libraryStore";
 import { usePlayerStore } from "../stores/playerStore";
 import type { Album, Artist, Song } from "../types/music";
+import { formatArtistStatsFrom, formatSongByline } from "../utils/display";
+import { showSetAsRingtoneHint, showSongDetails } from "../utils/songMenu";
 import { shareArtist, shareSong } from "../utils/share";
 
 const CATEGORIES = ["Songs", "Artists", "Albums", "Folders"] as const;
@@ -40,7 +43,9 @@ type DurationFilter = (typeof DURATION_FILTERS)[number];
 
 const TRENDING_FALLBACK = [
   "anirudh",
-  "weeknd",
+  "the weeknd",
+  "enrique iglesias",
+  "michael jackson",
   "arijit singh",
   "ed sheeran",
   "love songs",
@@ -122,6 +127,8 @@ export const SearchScreen = () => {
   const removeDownload = useLibraryStore((state) => state.removeDownload);
   const toggleFavorite = useLibraryStore((state) => state.toggleFavorite);
   const isFavorite = useLibraryStore((state) => state.isFavorite);
+  const toggleBlacklistSong = useLibraryStore((state) => state.toggleBlacklistSong);
+  const isBlacklistedSong = useLibraryStore((state) => state.isBlacklistedSong);
   const playlists = useLibraryStore((state) => state.playlists);
   const addSongToPlaylist = useLibraryStore((state) => state.addSongToPlaylist);
   const createPlaylist = useLibraryStore((state) => state.createPlaylist);
@@ -145,7 +152,13 @@ export const SearchScreen = () => {
   const [clearSearchConfirmVisible, setClearSearchConfirmVisible] = useState(false);
 
   const enrichArtistsWithStats = useCallback(async (items: Artist[]): Promise<Artist[]> => {
-    const missingStats = items.filter((item) => item.albumCount === undefined || item.songCount === undefined);
+    if (Platform.OS === "web") {
+      return items;
+    }
+
+    const missingStats = items
+      .filter((item) => item.albumCount === undefined || item.songCount === undefined)
+      .slice(0, 12);
     if (missingStats.length === 0) {
       return items;
     }
@@ -259,6 +272,7 @@ export const SearchScreen = () => {
     }
     const favorite = isFavorite(songSheet.id);
     const isDownloaded = Boolean(downloaded[songSheet.id]);
+    const blacklisted = isBlacklistedSong(songSheet.id);
     return [
       {
         id: "next",
@@ -286,13 +300,38 @@ export const SearchScreen = () => {
       },
       {
         id: "download",
-        label: isDownloaded ? "Delete from Device" : "Download Offline",
-        icon: isDownloaded ? ("trash-outline" as const) : ("download-outline" as const),
+        label: "Download Offline",
+        icon: "download-outline" as const,
+        onPress: () => {
+          void downloadSong(songSheet);
+        },
+      },
+      {
+        id: "details",
+        label: "Details",
+        icon: "information-circle-outline" as const,
+        onPress: () => showSongDetails(songSheet),
+      },
+      {
+        id: "ringtone",
+        label: "Set as Ringtone",
+        icon: "call-outline" as const,
+        onPress: () => showSetAsRingtoneHint(songSheet),
+      },
+      {
+        id: "blacklist",
+        label: blacklisted ? "Remove from Blacklist" : "Add to Blacklist",
+        icon: blacklisted ? ("close-circle-outline" as const) : ("ban-outline" as const),
+        active: blacklisted,
+        onPress: () => toggleBlacklistSong(songSheet),
+      },
+      {
+        id: "delete-device",
+        label: "Delete from Device",
+        icon: "trash-outline" as const,
         onPress: () => {
           if (isDownloaded) {
             void removeDownload(songSheet.id);
-          } else {
-            void downloadSong(songSheet);
           }
         },
       },
@@ -305,7 +344,18 @@ export const SearchScreen = () => {
         },
       },
     ];
-  }, [addPlayNext, addToQueue, downloadSong, downloaded, isFavorite, removeDownload, songSheet, toggleFavorite]);
+  }, [
+    addPlayNext,
+    addToQueue,
+    downloadSong,
+    downloaded,
+    isBlacklistedSong,
+    isFavorite,
+    removeDownload,
+    songSheet,
+    toggleBlacklistSong,
+    toggleFavorite,
+  ]);
 
   const playlistActions = useMemo(() => {
     if (!playlistPickerSong) {
@@ -678,7 +728,7 @@ export const SearchScreen = () => {
         colors={colors}
         image={playlistPickerSong?.image}
         title="Add to Playlist"
-        subtitle={playlistPickerSong ? `${playlistPickerSong.title} - ${playlistPickerSong.artist}` : undefined}
+        subtitle={playlistPickerSong ? formatSongByline(playlistPickerSong.title, playlistPickerSong.artist) : undefined}
         actions={playlistActions}
       />
 
@@ -688,11 +738,7 @@ export const SearchScreen = () => {
         colors={colors}
         image={artistSheet?.image}
         title={artistSheet?.name}
-        subtitle={
-          artistSheet
-            ? `${(artistSheet.albumCount ?? 0).toString()} Album   |   ${(artistSheet.songCount ?? 0).toString()} Songs`
-            : undefined
-        }
+        subtitle={artistSheet ? formatArtistStatsFrom(artistSheet) : undefined}
         actions={artistActions}
       />
 

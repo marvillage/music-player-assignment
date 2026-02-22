@@ -8,6 +8,7 @@ import { pickHighestQualityUrl } from "../utils/image";
 
 type LibraryState = {
   favorites: string[];
+  blacklistedSongIds: string[];
   playlists: Playlist[];
   downloaded: Record<string, string>;
   songCache: Record<string, Song>;
@@ -15,6 +16,8 @@ type LibraryState = {
   followedAlbums: string[];
   toggleFavorite: (song: Song) => void;
   isFavorite: (songId: string) => boolean;
+  toggleBlacklistSong: (song: Song) => void;
+  isBlacklistedSong: (songId: string) => boolean;
   cacheSongs: (songs: Song[]) => void;
   createPlaylist: (name: string) => string;
   renamePlaylist: (playlistId: string, name: string) => void;
@@ -43,6 +46,7 @@ export const useLibraryStore = create<LibraryState>()(
   persist(
     (set, get) => ({
       favorites: [],
+      blacklistedSongIds: [],
       playlists: [DEFAULT_PLAYLIST],
       downloaded: {},
       songCache: {},
@@ -70,6 +74,17 @@ export const useLibraryStore = create<LibraryState>()(
           };
         }),
       isFavorite: (songId) => get().favorites.includes(songId),
+      toggleBlacklistSong: (song) =>
+        set((state) => {
+          const exists = state.blacklistedSongIds.includes(song.id);
+          return {
+            blacklistedSongIds: exists
+              ? state.blacklistedSongIds.filter((id) => id !== song.id)
+              : [song.id, ...state.blacklistedSongIds],
+            songCache: { ...state.songCache, [song.id]: song },
+          };
+        }),
+      isBlacklistedSong: (songId) => get().blacklistedSongIds.includes(songId),
       cacheSongs: (songs) =>
         set((state) => {
           if (songs.length === 0) {
@@ -226,13 +241,26 @@ export const useLibraryStore = create<LibraryState>()(
     {
       name: "library-store-v1",
       storage: createJSONStorage(() => AsyncStorage),
-      partialize: (state) => ({
-        favorites: state.favorites,
-        playlists: state.playlists,
-        downloaded: state.downloaded,
-        followedArtists: state.followedArtists,
-        followedAlbums: state.followedAlbums,
-      }),
+      partialize: (state) => {
+        const pinnedSongIds = new Set<string>([
+          ...state.favorites,
+          ...Object.keys(state.downloaded),
+          ...state.playlists.flatMap((playlist) => playlist.songIds),
+        ]);
+        const pinnedSongCache = Object.fromEntries(
+          Object.entries(state.songCache).filter(([songId]) => pinnedSongIds.has(songId))
+        );
+
+        return {
+          favorites: state.favorites,
+          blacklistedSongIds: state.blacklistedSongIds,
+          playlists: state.playlists,
+          downloaded: state.downloaded,
+          songCache: pinnedSongCache,
+          followedArtists: state.followedArtists,
+          followedAlbums: state.followedAlbums,
+        };
+      },
       merge: (persisted, current) => {
         const merged = { ...current, ...(persisted as Partial<LibraryState>) };
         if (!merged.playlists.some((playlist) => playlist.id === "liked")) {

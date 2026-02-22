@@ -3,6 +3,7 @@ import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 
 import type { ThemeColors } from "../constants/theme";
 import type { Artist } from "../types/music";
+import { formatArtistStatsFrom } from "../utils/display";
 
 type Props = {
   artist: Artist;
@@ -19,7 +20,7 @@ export const ArtistRow = ({ artist, colors, onPress, onMenuPress }: Props) => (
         {artist.name}
       </Text>
       <Text numberOfLines={1} style={[styles.meta, { color: colors.textSecondary }]}>
-        {(artist.albumCount ?? 0).toString()} Album   |   {(artist.songCount ?? 0).toString()} Songs
+        {formatArtistStatsFrom(artist)}
       </Text>
     </View>
     <Pressable

@@ -1,15 +1,17 @@
 import { useNavigation } from "@react-navigation/native";
 import type { NavigationProp } from "@react-navigation/native";
-import { useMemo } from "react";
-import { FlatList, StyleSheet, Text, View } from "react-native";
+import { useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, FlatList, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { getSongById } from "../api/saavn";
 import { EmptyState } from "../components/EmptyState";
 import { SongRow } from "../components/SongRow";
 import { useTheme } from "../hooks/useTheme";
 import type { RootStackParamList } from "../navigation/types";
 import { useLibraryStore } from "../stores/libraryStore";
 import { usePlayerStore } from "../stores/playerStore";
+import type { Song } from "../types/music";
 
 export const FavoritesScreen = () => {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
@@ -17,7 +19,9 @@ export const FavoritesScreen = () => {
   const insets = useSafeAreaInsets();
   const favorites = useLibraryStore((state) => state.favorites);
   const songCache = useLibraryStore((state) => state.songCache);
+  const cacheSongs = useLibraryStore((state) => state.cacheSongs);
   const toggleFavorite = useLibraryStore((state) => state.toggleFavorite);
+  const [resolvingSongs, setResolvingSongs] = useState(false);
 
   const queue = usePlayerStore((state) => state.queue);
   const currentIndex = usePlayerStore((state) => state.currentIndex);
@@ -29,7 +33,48 @@ export const FavoritesScreen = () => {
     [favorites, songCache]
   );
 
+  useEffect(() => {
+    const missingIds = favorites.filter((songId) => !songCache[songId]);
+    if (missingIds.length === 0) {
+      setResolvingSongs(false);
+      return;
+    }
+
+    let active = true;
+    setResolvingSongs(true);
+    void (async () => {
+      const settled = await Promise.allSettled(missingIds.slice(0, 40).map((songId) => getSongById(songId)));
+      if (!active) {
+        return;
+      }
+      const foundSongs = settled
+        .filter((result): result is PromiseFulfilledResult<Song | null> => result.status === "fulfilled")
+        .map((result) => result.value)
+        .filter((song): song is Song => Boolean(song));
+      if (foundSongs.length > 0) {
+        cacheSongs(foundSongs);
+      }
+      setResolvingSongs(false);
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [cacheSongs, favorites, songCache]);
+
   if (items.length === 0) {
+    if (resolvingSongs && favorites.length > 0) {
+      return (
+        <SafeAreaView
+          style={[styles.safe, { backgroundColor: colors.background, paddingTop: Math.max(insets.top, 20) }]}
+          edges={["left", "right", "bottom"]}
+        >
+          <View style={styles.loaderWrap}>
+            <ActivityIndicator color={colors.accent} />
+          </View>
+        </SafeAreaView>
+      );
+    }
     return (
       <SafeAreaView
         style={[styles.safe, { backgroundColor: colors.background, paddingTop: Math.max(insets.top, 20) }]}
@@ -94,5 +139,10 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingBottom: 160,
+  },
+  loaderWrap: {
+    alignItems: "center",
+    flex: 1,
+    justifyContent: "center",
   },
 });

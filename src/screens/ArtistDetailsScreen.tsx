@@ -14,6 +14,9 @@ import { useLibraryStore } from "../stores/libraryStore";
 import { usePlayerStore } from "../stores/playerStore";
 import type { Artist, Song } from "../types/music";
 import { formatDuration } from "../utils/format";
+import { formatArtistStats, formatSongByline } from "../utils/display";
+import { buildAlbumFromSong, buildArtistFromSong } from "../utils/navigation";
+import { showSetAsRingtoneHint, showSongDetails } from "../utils/songMenu";
 import { shareArtist, shareSong } from "../utils/share";
 
 type ScreenRoute = RouteProp<RootStackParamList, "ArtistDetails">;
@@ -42,6 +45,8 @@ export const ArtistDetailsScreen = () => {
   const removeDownload = useLibraryStore((state) => state.removeDownload);
   const toggleFavorite = useLibraryStore((state) => state.toggleFavorite);
   const isFavorite = useLibraryStore((state) => state.isFavorite);
+  const toggleBlacklistSong = useLibraryStore((state) => state.toggleBlacklistSong);
+  const isBlacklistedSong = useLibraryStore((state) => state.isBlacklistedSong);
   const playlists = useLibraryStore((state) => state.playlists);
   const addSongToPlaylist = useLibraryStore((state) => state.addSongToPlaylist);
   const createPlaylist = useLibraryStore((state) => state.createPlaylist);
@@ -162,6 +167,7 @@ export const ArtistDetailsScreen = () => {
     }
     const favorite = isFavorite(songSheet.id);
     const isDownloaded = Boolean(downloaded[songSheet.id]);
+    const blacklisted = isBlacklistedSong(songSheet.id);
     return [
       {
         id: "next",
@@ -179,29 +185,19 @@ export const ArtistDetailsScreen = () => {
         id: "album",
         label: "Go to Album",
         icon: "disc-outline" as const,
-        onPress: () =>
-          navigation.navigate("AlbumDetails", {
-            album: {
-              id: songSheet.albumId ?? songSheet.id,
-              name: songSheet.albumName ?? "Album",
-              artistName: songSheet.artist,
-              image: songSheet.image,
-              year: songSheet.year,
-            },
-          }),
+        onPress: () => {
+          const album = buildAlbumFromSong(songSheet);
+          if (!album) {
+            return;
+          }
+          navigation.navigate("AlbumDetails", { album });
+        },
       },
       {
         id: "artist",
         label: "Go to Artist",
         icon: "person-outline" as const,
-        onPress: () =>
-          navigation.navigate("ArtistDetails", {
-            artist: {
-              id: songSheet.artistId ?? songSheet.id,
-              name: songSheet.artist,
-              image: songSheet.image,
-            },
-          }),
+        onPress: () => navigation.navigate("ArtistDetails", { artist: buildArtistFromSong(songSheet) }),
       },
       {
         id: "favorite",
@@ -217,13 +213,38 @@ export const ArtistDetailsScreen = () => {
       },
       {
         id: "download",
-        label: isDownloaded ? "Delete from Device" : "Download Offline",
-        icon: isDownloaded ? ("trash-outline" as const) : ("download-outline" as const),
+        label: "Download Offline",
+        icon: "download-outline" as const,
+        onPress: () => {
+          void downloadSong(songSheet);
+        },
+      },
+      {
+        id: "details",
+        label: "Details",
+        icon: "information-circle-outline" as const,
+        onPress: () => showSongDetails(songSheet),
+      },
+      {
+        id: "ringtone",
+        label: "Set as Ringtone",
+        icon: "call-outline" as const,
+        onPress: () => showSetAsRingtoneHint(songSheet),
+      },
+      {
+        id: "blacklist",
+        label: blacklisted ? "Remove from Blacklist" : "Add to Blacklist",
+        icon: blacklisted ? ("close-circle-outline" as const) : ("ban-outline" as const),
+        active: blacklisted,
+        onPress: () => toggleBlacklistSong(songSheet),
+      },
+      {
+        id: "delete-device",
+        label: "Delete from Device",
+        icon: "trash-outline" as const,
         onPress: () => {
           if (isDownloaded) {
             void removeDownload(songSheet.id);
-          } else {
-            void downloadSong(songSheet);
           }
         },
       },
@@ -241,10 +262,12 @@ export const ArtistDetailsScreen = () => {
     addToQueue,
     downloadSong,
     downloaded,
+    isBlacklistedSong,
     isFavorite,
     navigation,
     removeDownload,
     songSheet,
+    toggleBlacklistSong,
     toggleFavorite,
   ]);
 
@@ -295,7 +318,7 @@ export const ArtistDetailsScreen = () => {
             <Image source={{ uri: artist.image }} style={styles.hero} />
             <Text style={[styles.name, { color: colors.text }]}>{artist.name}</Text>
             <Text style={[styles.meta, { color: colors.textSecondary }]}>
-              {(artist.albumCount ?? 0).toString()} Album   |   {songs.length} Songs   |   {formatDuration(totalDurationSec)} mins
+              {formatArtistStats(artist.albumCount ?? 0, songs.length)}   |   {formatDuration(totalDurationSec)} mins
             </Text>
             <View style={styles.actions}>
               <Pressable style={[styles.primaryButton, { backgroundColor: colors.accent }]} onPress={shuffleAndPlay}>
@@ -363,7 +386,7 @@ export const ArtistDetailsScreen = () => {
         colors={colors}
         image={artist.image}
         title={artist.name}
-        subtitle={`${(artist.albumCount ?? 0).toString()} Album   |   ${songs.length} Songs`}
+        subtitle={formatArtistStats(artist.albumCount ?? 0, songs.length)}
         actions={artistActions}
       />
 
@@ -383,7 +406,7 @@ export const ArtistDetailsScreen = () => {
         colors={colors}
         image={playlistPickerSong?.image}
         title="Add to Playlist"
-        subtitle={playlistPickerSong ? `${playlistPickerSong.title} - ${playlistPickerSong.artist}` : undefined}
+        subtitle={playlistPickerSong ? formatSongByline(playlistPickerSong.title, playlistPickerSong.artist) : undefined}
         actions={playlistActions}
       />
     </SafeAreaView>

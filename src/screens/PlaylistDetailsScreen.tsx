@@ -1,11 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NavigationProp, RouteProp } from "@react-navigation/native";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { ActivityIndicator } from "react-native";
 import { FlatList, Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import DraggableFlatList, { ScaleDecorator } from "react-native-draggable-flatlist";
 
+import { getSongById } from "../api/saavn";
 import { BottomSheet } from "../components/BottomSheet";
 import type { SheetAction } from "../components/BottomSheet";
 import { EmptyState } from "../components/EmptyState";
@@ -16,6 +18,7 @@ import { useLibraryStore } from "../stores/libraryStore";
 import { usePlayerStore } from "../stores/playerStore";
 import type { Song } from "../types/music";
 import { formatDurationLabel } from "../utils/format";
+import { showSetAsRingtoneHint, showSongDetails } from "../utils/songMenu";
 import { sharePlaylist, shareSong } from "../utils/share";
 
 type ScreenRoute = RouteProp<RootStackParamList, "PlaylistDetails">;
@@ -24,6 +27,10 @@ const SMART_PLAYLISTS: Record<string, string> = {
   "smart-recent": "Recently Played",
   "smart-most-played": "Most Played",
   "smart-downloaded": "Downloaded",
+  "smart-favorites": "Favorites Mix",
+  "smart-english": "English Mix",
+  "smart-hindi": "Hindi Mix",
+  "smart-long": "Long Play",
 };
 
 export const PlaylistDetailsScreen = () => {
@@ -33,10 +40,16 @@ export const PlaylistDetailsScreen = () => {
 
   const playlistId = route.params.playlistId;
   const playlist = useLibraryStore((state) => state.playlists.find((item) => item.id === playlistId));
+  const favorites = useLibraryStore((state) => state.favorites);
   const songCache = useLibraryStore((state) => state.songCache);
+  const cacheSongs = useLibraryStore((state) => state.cacheSongs);
   const downloaded = useLibraryStore((state) => state.downloaded);
+  const downloadSong = useLibraryStore((state) => state.downloadSong);
+  const removeDownload = useLibraryStore((state) => state.removeDownload);
   const isFavorite = useLibraryStore((state) => state.isFavorite);
   const toggleFavorite = useLibraryStore((state) => state.toggleFavorite);
+  const isBlacklistedSong = useLibraryStore((state) => state.isBlacklistedSong);
+  const toggleBlacklistSong = useLibraryStore((state) => state.toggleBlacklistSong);
   const removeSongFromPlaylist = useLibraryStore((state) => state.removeSongFromPlaylist);
   const moveSongInPlaylist = useLibraryStore((state) => state.moveSongInPlaylist);
 
@@ -51,6 +64,44 @@ export const PlaylistDetailsScreen = () => {
   const addToQueue = usePlayerStore((state) => state.addToQueue);
 
   const [songSheet, setSongSheet] = useState<Song | null>(null);
+  const [resolvingSongs, setResolvingSongs] = useState(false);
+
+  const sourceSongIds = useMemo(() => {
+    if (playlistId === "smart-recent") {
+      return recentlyPlayed.map((song) => song.id);
+    }
+    if (playlistId === "smart-most-played") {
+      return Object.entries(playCounts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([songId]) => songId)
+        .slice(0, 100);
+    }
+    if (playlistId === "smart-downloaded") {
+      return Object.keys(downloaded);
+    }
+    if (playlistId === "smart-favorites") {
+      return favorites;
+    }
+    if (playlistId === "smart-english") {
+      return Object.values(songCache)
+        .filter((song) => song.language?.toLowerCase() === "english")
+        .map((song) => song.id);
+    }
+    if (playlistId === "smart-hindi") {
+      return Object.values(songCache)
+        .filter((song) => song.language?.toLowerCase() === "hindi")
+        .map((song) => song.id);
+    }
+    if (playlistId === "smart-long") {
+      return Object.values(songCache)
+        .filter((song) => song.durationSec > 300)
+        .map((song) => song.id);
+    }
+    if (!playlist) {
+      return [];
+    }
+    return playlist.songIds;
+  }, [downloaded, favorites, playCounts, playlist, playlistId, recentlyPlayed, songCache]);
 
   const songs = useMemo(() => {
     if (playlistId === "smart-recent") {
@@ -68,11 +119,63 @@ export const PlaylistDetailsScreen = () => {
         .map((songId) => songCache[songId])
         .filter(Boolean);
     }
+    if (playlistId === "smart-favorites") {
+      return favorites
+        .map((songId) => songCache[songId])
+        .filter(Boolean);
+    }
+    if (playlistId === "smart-english") {
+      return Object.values(songCache)
+        .filter((song) => song.language?.toLowerCase() === "english")
+        .slice(0, 120);
+    }
+    if (playlistId === "smart-hindi") {
+      return Object.values(songCache)
+        .filter((song) => song.language?.toLowerCase() === "hindi")
+        .slice(0, 120);
+    }
+    if (playlistId === "smart-long") {
+      return Object.values(songCache)
+        .filter((song) => song.durationSec > 300)
+        .sort((a, b) => b.durationSec - a.durationSec)
+        .slice(0, 120);
+    }
     if (!playlist) {
       return [];
     }
     return playlist.songIds.map((songId) => songCache[songId]).filter(Boolean);
-  }, [downloaded, playCounts, playlist, playlistId, recentlyPlayed, songCache]);
+  }, [downloaded, favorites, playCounts, playlist, playlistId, recentlyPlayed, songCache]);
+
+  useEffect(() => {
+    const missingIds = sourceSongIds.filter((songId) => !songCache[songId]);
+    if (missingIds.length === 0) {
+      setResolvingSongs(false);
+      return;
+    }
+
+    let active = true;
+    setResolvingSongs(true);
+    void (async () => {
+      const settled = await Promise.allSettled(missingIds.slice(0, 50).map((songId) => getSongById(songId)));
+      if (!active) {
+        return;
+      }
+
+      const foundSongs = settled
+        .filter((result): result is PromiseFulfilledResult<Song | null> => result.status === "fulfilled")
+        .map((result) => result.value)
+        .filter((song): song is Song => Boolean(song));
+
+      if (foundSongs.length > 0) {
+        cacheSongs(foundSongs);
+      }
+      setResolvingSongs(false);
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [cacheSongs, songCache, sourceSongIds]);
 
   const isSmartPlaylist = playlistId in SMART_PLAYLISTS;
   const title = isSmartPlaylist ? SMART_PLAYLISTS[playlistId] : playlist?.name ?? "Playlist";
@@ -84,6 +187,8 @@ export const PlaylistDetailsScreen = () => {
       return [];
     }
     const favorite = isFavorite(songSheet.id);
+    const isDownloaded = Boolean(downloaded[songSheet.id]);
+    const blacklisted = isBlacklistedSong(songSheet.id);
     const actions: SheetAction[] = [
       {
         id: "next",
@@ -104,11 +209,48 @@ export const PlaylistDetailsScreen = () => {
         onPress: () => toggleFavorite(songSheet),
       },
       {
+        id: "download",
+        label: "Download Offline",
+        icon: "download-outline" as const,
+        onPress: () => {
+          void downloadSong(songSheet);
+        },
+      },
+      {
+        id: "details",
+        label: "Details",
+        icon: "information-circle-outline" as const,
+        onPress: () => showSongDetails(songSheet),
+      },
+      {
+        id: "ringtone",
+        label: "Set as Ringtone",
+        icon: "call-outline" as const,
+        onPress: () => showSetAsRingtoneHint(songSheet),
+      },
+      {
+        id: "blacklist",
+        label: blacklisted ? "Remove from Blacklist" : "Add to Blacklist",
+        icon: blacklisted ? ("close-circle-outline" as const) : ("ban-outline" as const),
+        active: blacklisted,
+        onPress: () => toggleBlacklistSong(songSheet),
+      },
+      {
         id: "share",
         label: "Share Song",
         icon: "share-social-outline" as const,
         onPress: () => {
           void shareSong(songSheet);
+        },
+      },
+      {
+        id: "delete-device",
+        label: "Delete from Device",
+        icon: "trash-outline" as const,
+        onPress: () => {
+          if (isDownloaded) {
+            void removeDownload(songSheet.id);
+          }
         },
       },
     ];
@@ -131,7 +273,21 @@ export const PlaylistDetailsScreen = () => {
     }
 
     return actions;
-  }, [addPlayNext, addToQueue, canRemoveSongs, isFavorite, playlist, removeSongFromPlaylist, songSheet, toggleFavorite]);
+  }, [
+    addPlayNext,
+    addToQueue,
+    canRemoveSongs,
+    downloadSong,
+    downloaded,
+    isBlacklistedSong,
+    isFavorite,
+    playlist,
+    removeDownload,
+    removeSongFromPlaylist,
+    songSheet,
+    toggleBlacklistSong,
+    toggleFavorite,
+  ]);
 
   const playFromList = (index: number) => {
     if (songs.length === 0) {
@@ -141,8 +297,8 @@ export const PlaylistDetailsScreen = () => {
     navigation.navigate("Player");
   };
 
-  const renderRow = (item: Song, index: number, drag?: () => void, isDragging?: boolean) => (
-    <ScaleDecorator>
+  const renderRow = (item: Song, index: number, drag?: () => void, isDragging?: boolean) => {
+    const row = (
       <Pressable
         onPress={() => playFromList(index)}
         onLongPress={drag}
@@ -172,8 +328,10 @@ export const PlaylistDetailsScreen = () => {
           </Pressable>
         </View>
       </Pressable>
-    </ScaleDecorator>
-  );
+    );
+
+    return drag ? <ScaleDecorator>{row}</ScaleDecorator> : row;
+  };
 
   if (!playlist && !isSmartPlaylist) {
     return (
@@ -210,7 +368,13 @@ export const PlaylistDetailsScreen = () => {
       </View>
 
       {songs.length === 0 ? (
+        resolvingSongs && sourceSongIds.length > 0 ? (
+          <View style={styles.loadingWrap}>
+            <ActivityIndicator color={colors.accent} />
+          </View>
+        ) : (
         <EmptyState colors={colors} title="No Songs Yet" message="Add songs from the 3-dot menu on any track." icon="musical-notes-outline" />
+        )
       ) : canReorder ? (
         <DraggableFlatList
           data={songs}
@@ -271,6 +435,11 @@ const styles = StyleSheet.create({
   listContent: {
     gap: 10,
     paddingBottom: 140,
+  },
+  loadingWrap: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingTop: 40,
   },
   row: {
     alignItems: "center",

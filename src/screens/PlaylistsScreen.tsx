@@ -19,6 +19,7 @@ export const PlaylistsScreen = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const playlists = useLibraryStore((state) => state.playlists);
+  const favorites = useLibraryStore((state) => state.favorites);
   const favoritesCount = useLibraryStore((state) => state.favorites.length);
   const downloaded = useLibraryStore((state) => state.downloaded);
   const songCache = useLibraryStore((state) => state.songCache);
@@ -35,7 +36,13 @@ export const PlaylistsScreen = () => {
   const [editingPlaylist, setEditingPlaylist] = useState<Playlist | null>(null);
 
   const smartPlaylists = useMemo(
-    () => [
+    () => {
+      const cachedSongs = Object.values(songCache);
+      const englishCount = cachedSongs.filter((song) => song.language?.toLowerCase() === "english").length;
+      const hindiCount = cachedSongs.filter((song) => song.language?.toLowerCase() === "hindi").length;
+      const longPlayCount = cachedSongs.filter((song) => song.durationSec > 300).length;
+
+      return [
       {
         id: "smart-recent",
         name: "Recently Played",
@@ -47,7 +54,7 @@ export const PlaylistsScreen = () => {
         id: "smart-most-played",
         name: "Most Played",
         icon: "flame-outline" as const,
-        count: Object.entries(playCounts).filter(([songId, count]) => count > 0 && Boolean(songCache[songId])).length,
+        count: Object.values(playCounts).filter((count) => count > 0).length,
         subtitle: "Songs you replay the most",
       },
       {
@@ -57,8 +64,37 @@ export const PlaylistsScreen = () => {
         count: Object.keys(downloaded).length,
         subtitle: "Available offline",
       },
-    ],
-    [downloaded, playCounts, recentlyPlayed.length, songCache]
+      {
+        id: "smart-favorites",
+        name: "Favorites Mix",
+        icon: "heart-outline" as const,
+        count: favorites.length,
+        subtitle: "Songs you liked the most",
+      },
+      {
+        id: "smart-english",
+        name: "English Mix",
+        icon: "globe-outline" as const,
+        count: englishCount,
+        subtitle: "English tracks from your library",
+      },
+      {
+        id: "smart-hindi",
+        name: "Hindi Mix",
+        icon: "musical-notes-outline" as const,
+        count: hindiCount,
+        subtitle: "Hindi tracks from your library",
+      },
+      {
+        id: "smart-long",
+        name: "Long Play",
+        icon: "hourglass-outline" as const,
+        count: longPlayCount,
+        subtitle: "Songs longer than 5 minutes",
+      },
+    ];
+    },
+    [downloaded, favorites.length, playCounts, recentlyPlayed.length, songCache]
   );
 
   const openCreateModal = () => {

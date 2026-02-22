@@ -3,6 +3,7 @@ import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 
 import type { ThemeColors } from "../constants/theme";
 import type { Album } from "../types/music";
+import { formatAlbumMeta, formatCountLabel } from "../utils/display";
 
 type Props = {
   album: Album;
@@ -32,10 +33,10 @@ export const AlbumCard = ({ album, colors, onPress, onMenuPress, compact }: Prop
       ) : null}
     </View>
     <Text numberOfLines={1} style={[styles.meta, { color: colors.textSecondary }]}>
-      {album.artistName} {album.year ? `| ${album.year}` : ""}
+      {formatAlbumMeta(album.artistName, album.year)}
     </Text>
     {album.songCount ? (
-      <Text style={[styles.meta, { color: colors.textSecondary }]}>{album.songCount} songs</Text>
+      <Text style={[styles.meta, { color: colors.textSecondary }]}>{formatCountLabel(album.songCount, "song")}</Text>
     ) : null}
   </Pressable>
 );

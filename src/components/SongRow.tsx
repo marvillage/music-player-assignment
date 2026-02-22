@@ -3,7 +3,7 @@ import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 
 import type { ThemeColors } from "../constants/theme";
 import type { Song } from "../types/music";
-import { formatDurationLabel } from "../utils/format";
+import { formatSongMeta } from "../utils/display";
 
 type Props = {
   song: Song;
@@ -25,46 +25,46 @@ export const SongRow = ({
   onPlayPress,
   onMenuPress,
   showHeart = false,
-}: Props) => (
-  <Pressable onPress={onPress} style={styles.container}>
-    <Image source={{ uri: song.image }} style={styles.cover} />
-    <View style={styles.info}>
-      <Text numberOfLines={1} style={[styles.title, { color: colors.text }]}>
-        {song.title}
-      </Text>
-      <Text numberOfLines={1} style={[styles.meta, { color: colors.textSecondary }]}>
-        {song.artist}   |   {formatDurationLabel(song.durationSec)}
-      </Text>
-    </View>
+}: Props) => {
+  const isRowPlaying = Boolean(isActive && isPlaying);
 
-    <View style={styles.actions}>
-      <Pressable
-        onPress={(event) => {
-          event.stopPropagation();
-          onPlayPress?.();
-        }}
-        style={[styles.playButton, { backgroundColor: isActive && isPlaying ? "transparent" : colors.accentSoft }]}
-        hitSlop={8}
-      >
-        <Ionicons
-          name={isActive && isPlaying ? "pause" : "play"}
-          size={18}
-          color={isActive && isPlaying ? colors.accent : colors.accent}
-        />
-      </Pressable>
+  return (
+    <Pressable onPress={onPress} style={styles.container}>
+      <Image source={{ uri: song.image }} style={styles.cover} />
+      <View style={styles.info}>
+        <Text numberOfLines={1} style={[styles.title, { color: colors.text }]}>
+          {song.title}
+        </Text>
+        <Text numberOfLines={1} style={[styles.meta, { color: colors.textSecondary }]}>
+          {formatSongMeta(song.artist, song.durationSec)}
+        </Text>
+      </View>
 
-      <Pressable
-        onPress={(event) => {
-          event.stopPropagation();
-          onMenuPress?.();
-        }}
-        hitSlop={8}
-      >
-        <Ionicons name={showHeart ? "heart-outline" : "ellipsis-vertical"} size={18} color={colors.text} />
-      </Pressable>
-    </View>
-  </Pressable>
-);
+      <View style={styles.actions}>
+        <Pressable
+          onPress={(event) => {
+            event.stopPropagation();
+            onPlayPress?.();
+          }}
+          style={[styles.playButton, { backgroundColor: isRowPlaying ? "transparent" : colors.accentSoft }]}
+          hitSlop={8}
+        >
+          <Ionicons name={isRowPlaying ? "pause" : "play"} size={18} color={colors.accent} />
+        </Pressable>
+
+        <Pressable
+          onPress={(event) => {
+            event.stopPropagation();
+            onMenuPress?.();
+          }}
+          hitSlop={8}
+        >
+          <Ionicons name={showHeart ? "heart-outline" : "ellipsis-vertical"} size={18} color={colors.text} />
+        </Pressable>
+      </View>
+    </Pressable>
+  );
+};
 
 const styles = StyleSheet.create({
   container: {

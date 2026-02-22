@@ -6,6 +6,7 @@ import {
   ActivityIndicator,
   FlatList,
   Image,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,7 +15,7 @@ import {
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { getArtistById, getArtistSongs, searchAlbums, searchArtists, searchSongs } from "../api/saavn";
+import { getArtistById, getArtistSongs, getSongById, searchAlbums, searchArtists, searchSongs } from "../api/saavn";
 import { AlbumCard } from "../components/AlbumCard";
 import { AppHeader } from "../components/AppHeader";
 import { ArtistRow } from "../components/ArtistRow";
@@ -30,11 +31,54 @@ import { useLibraryStore } from "../stores/libraryStore";
 import { usePlayerStore } from "../stores/playerStore";
 import type { Album, Artist, Song, SortOption } from "../types/music";
 import { sortSongs } from "../utils/format";
+import { formatArtistStatsFrom, formatSongByline } from "../utils/display";
+import { buildAlbumFromSong, buildArtistFromSong } from "../utils/navigation";
+import { showSetAsRingtoneHint, showSongDetails } from "../utils/songMenu";
 import { shareAlbum, shareArtist, shareSong } from "../utils/share";
 
 const HOME_TABS = ["Suggested", "Songs", "Artists", "Albums", "Folders"];
 const ARTISTS_DISCOVERY_QUERY = "top artists";
 const ALBUMS_DISCOVERY_QUERY = "top hindi albums";
+const ENGLISH_ARTIST_SEEDS = ["the weeknd", "enrique iglesias", "michael jackson"] as const;
+const SONG_FEED_BASE_QUERIES = ["top songs", "english songs"] as const;
+const SONG_DISCOVERY_QUERIES = [
+  "top songs",
+  "top hits",
+  "hindi songs",
+  "english songs",
+  "punjabi songs",
+  "bollywood songs",
+  "indie songs",
+  "lofi songs",
+  "romantic songs",
+  "party songs",
+  "90s songs",
+  "sad songs",
+] as const;
+const ARTIST_DISCOVERY_QUERIES = [
+  "top artists",
+  "hindi artists",
+  "english artists",
+  "arijit singh",
+  "shreya ghoshal",
+  "ar rahman",
+  "the weeknd",
+  "ed sheeran",
+  "enrique iglesias",
+  "michael jackson",
+] as const;
+const ALBUM_DISCOVERY_QUERIES = [
+  "top albums",
+  "top hindi albums",
+  "top english albums",
+  "bollywood albums",
+  "indie albums",
+  "romantic albums",
+  "party albums",
+  "the weeknd",
+  "enrique iglesias",
+  "michael jackson",
+] as const;
 const SONG_SORT_OPTIONS: SortOption[] = [
   "Ascending",
   "Descending",
@@ -45,6 +89,7 @@ const SONG_SORT_OPTIONS: SortOption[] = [
   "Date Modified",
   "Composer",
 ];
+const PLACEHOLDER_IMAGE_TOKEN = "placeholder_view_vector.svg";
 
 const uniqueById = <T extends { id: string }>(items: T[]): T[] => {
   const seen = new Set<string>();
@@ -59,6 +104,83 @@ const uniqueById = <T extends { id: string }>(items: T[]): T[] => {
   return output;
 };
 
+const normalizeKey = (value: string): string =>
+  value
+    .toLowerCase()
+    .replace(/&[^;\s]+;/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const songDiversityKey = (song: Song): string => `${normalizeKey(song.title)}|${normalizeKey(song.artist)}`;
+const artistDiversityKey = (artist: Artist): string => normalizeKey(artist.name);
+const albumDiversityKey = (album: Album): string => `${normalizeKey(album.name)}|${normalizeKey(album.artistName)}`;
+
+const interleaveBuckets = <T,>(
+  buckets: T[][],
+  keyOf: (item: T) => string,
+  limit = 120
+): T[] => {
+  if (buckets.length === 0) {
+    return [];
+  }
+
+  const pointers = buckets.map(() => 0);
+  const seen = new Set<string>();
+  const output: T[] = [];
+  let progressed = true;
+
+  while (progressed && output.length < limit) {
+    progressed = false;
+    for (let i = 0; i < buckets.length; i += 1) {
+      const bucket = buckets[i];
+      while (pointers[i] < bucket.length) {
+        const item = bucket[pointers[i]];
+        pointers[i] += 1;
+        const key = keyOf(item);
+        if (key.length === 0 || seen.has(key)) {
+          continue;
+        }
+        seen.add(key);
+        output.push(item);
+        progressed = true;
+        break;
+      }
+      if (output.length >= limit) {
+        break;
+      }
+    }
+  }
+
+  return output;
+};
+
+const pickQueryWindow = (queries: readonly string[], page: number, windowSize: number): string[] => {
+  if (queries.length <= windowSize) {
+    return [...queries];
+  }
+  const start = ((Math.max(page, 1) - 1) * windowSize) % queries.length;
+  const selected: string[] = [];
+  for (let i = 0; i < windowSize; i += 1) {
+    selected.push(queries[(start + i) % queries.length]);
+  }
+  return selected;
+};
+
+const mergePaginatedItems = <T extends { id: string }>(
+  results: PromiseSettledResult<{ items: T[]; total: number; hasMore: boolean }>[]
+) => {
+  const fulfilled = results
+    .filter((result): result is PromiseFulfilledResult<{ items: T[]; total: number; hasMore: boolean }> => result.status === "fulfilled")
+    .map((result) => result.value);
+
+  return {
+    items: uniqueById(fulfilled.flatMap((result) => result.items)),
+    total: fulfilled.reduce((sum, result) => sum + result.total, 0),
+    hasMore: fulfilled.some((result) => result.hasMore),
+  };
+};
+
 export const HomeScreen = () => {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -71,11 +193,14 @@ export const HomeScreen = () => {
   const queue = usePlayerStore((state) => state.queue);
   const isPlaying = usePlayerStore((state) => state.isPlaying);
   const downloaded = useLibraryStore((state) => state.downloaded);
+  const songCache = useLibraryStore((state) => state.songCache);
   const downloadSong = useLibraryStore((state) => state.downloadSong);
   const removeDownload = useLibraryStore((state) => state.removeDownload);
   const cacheSongs = useLibraryStore((state) => state.cacheSongs);
   const toggleFavorite = useLibraryStore((state) => state.toggleFavorite);
   const isFavorite = useLibraryStore((state) => state.isFavorite);
+  const toggleBlacklistSong = useLibraryStore((state) => state.toggleBlacklistSong);
+  const isBlacklistedSong = useLibraryStore((state) => state.isBlacklistedSong);
   const playlists = useLibraryStore((state) => state.playlists);
   const addSongToPlaylist = useLibraryStore((state) => state.addSongToPlaylist);
   const createPlaylist = useLibraryStore((state) => state.createPlaylist);
@@ -122,12 +247,60 @@ export const HomeScreen = () => {
   const albumsInitRef = useRef(false);
 
   const downloadedSongs = useMemo(
-    () => songs.filter((song) => Boolean(downloaded[song.id])),
-    [songs, downloaded]
+    () =>
+      Object.keys(downloaded)
+        .map((songId) => songCache[songId])
+        .filter((song): song is Song => Boolean(song)),
+    [downloaded, songCache]
   );
+
+  useEffect(() => {
+    const missingIds = Object.keys(downloaded).filter((songId) => !songCache[songId]);
+    if (missingIds.length === 0) {
+      return;
+    }
+
+    let active = true;
+    void (async () => {
+      const settled = await Promise.allSettled(missingIds.slice(0, 40).map((songId) => getSongById(songId)));
+      if (!active) {
+        return;
+      }
+      const foundSongs = settled
+        .filter((result): result is PromiseFulfilledResult<Song | null> => result.status === "fulfilled")
+        .map((result) => result.value)
+        .filter((song): song is Song => Boolean(song));
+      if (foundSongs.length > 0) {
+        cacheSongs(foundSongs);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [cacheSongs, downloaded, songCache]);
 
   const sortedSongs = useMemo(() => sortSongs(songs, songSort), [songs, songSort]);
   const recentList = suggestedSongs.length > 0 ? suggestedSongs : recentlyPlayed;
+  const newForYouSongs = useMemo(
+    () => uniqueById([...suggestedSongs, ...recentlyPlayed, ...mostPlayed]).slice(0, 10),
+    [mostPlayed, recentlyPlayed, suggestedSongs]
+  );
+  const onRepeatSongs = useMemo(
+    () => uniqueById([...mostPlayed, ...suggestedSongs, ...recentlyPlayed]).slice(0, 10),
+    [mostPlayed, recentlyPlayed, suggestedSongs]
+  );
+  const downloadedMixSongs = useMemo(() => {
+    const seed = downloadedSongs.length > 0 ? downloadedSongs : suggestedSongs;
+    return uniqueById([...seed, ...mostPlayed, ...recentlyPlayed]).slice(0, 10);
+  }, [downloadedSongs, mostPlayed, recentlyPlayed, suggestedSongs]);
+  const artistSpotlight = useMemo(() => {
+    if (suggestedArtists.length <= 1) {
+      return suggestedArtists;
+    }
+    const pivot = Math.min(3, suggestedArtists.length - 1);
+    return [...suggestedArtists.slice(pivot), ...suggestedArtists.slice(0, pivot)].slice(0, 10);
+  }, [suggestedArtists]);
 
   const loadSuggested = useCallback(async () => {
     if (loadingSuggestedRef.current) {
@@ -136,19 +309,26 @@ export const HomeScreen = () => {
     loadingSuggestedRef.current = true;
     setLoadingSuggested(true);
     try {
-      const [globalSongsResult, localSongsResult, mostPlayedSeedResult, globalArtistsResult] = await Promise.allSettled([
-        searchSongs("top hits", 1),
-        searchSongs("english songs", 1),
-        searchSongs("hindi songs", 1),
-        searchArtists(ARTISTS_DISCOVERY_QUERY, 1),
+      const [songsSettled, artistsSettled] = await Promise.all([
+        Promise.allSettled(SONG_DISCOVERY_QUERIES.map((query) => searchSongs(query, 1))),
+        Promise.allSettled(ARTIST_DISCOVERY_QUERIES.map((query) => searchArtists(query, 1))),
       ]);
-      const globalSongs = globalSongsResult.status === "fulfilled" ? globalSongsResult.value.items : [];
-      const localSongs = localSongsResult.status === "fulfilled" ? localSongsResult.value.items : [];
-      const mostPlayedSeed = mostPlayedSeedResult.status === "fulfilled" ? mostPlayedSeedResult.value.items : [];
-      const globalArtists = globalArtistsResult.status === "fulfilled" ? globalArtistsResult.value.items : [];
 
-      const mixedSuggested = uniqueById([...globalSongs, ...localSongs]).slice(0, 10);
-      const mixedMostPlayed = uniqueById([...mostPlayedSeed, ...globalSongs, ...localSongs]).slice(0, 10);
+      const songBuckets: Song[][] = [];
+      songsSettled.forEach((result) => {
+        if (result.status === "fulfilled") {
+          songBuckets.push(result.value.items);
+        }
+      });
+      const artistBuckets: Artist[][] = [];
+      artistsSettled.forEach((result) => {
+        if (result.status === "fulfilled") {
+          artistBuckets.push(result.value.items);
+        }
+      });
+
+      const mixedSuggested = interleaveBuckets(songBuckets, songDiversityKey, 18).slice(0, 10);
+      const mixedMostPlayed = interleaveBuckets([...songBuckets].reverse(), songDiversityKey, 18).slice(0, 10);
       const fallbackArtistsByName = new Map<string, Artist>();
       [...mixedSuggested, ...mixedMostPlayed]
         .filter((song) => song.artist.trim().length > 0)
@@ -167,7 +347,16 @@ export const HomeScreen = () => {
 
       setSuggestedSongs(mixedSuggested.length > 0 ? mixedSuggested : recentlyPlayed.slice(0, 10));
       setMostPlayed(mixedMostPlayed.length > 0 ? mixedMostPlayed : recentlyPlayed.slice(0, 10));
-      setSuggestedArtists((globalArtists.length > 0 ? globalArtists : fallbackArtists).slice(0, 10));
+      const preferredArtists = interleaveBuckets(artistBuckets, artistDiversityKey, 24).slice(0, 14);
+      const sortedArtists = preferredArtists.sort((a, b) => {
+        const aIsPlaceholder = a.image.toLowerCase().includes(PLACEHOLDER_IMAGE_TOKEN);
+        const bIsPlaceholder = b.image.toLowerCase().includes(PLACEHOLDER_IMAGE_TOKEN);
+        if (aIsPlaceholder === bIsPlaceholder) {
+          return 0;
+        }
+        return aIsPlaceholder ? 1 : -1;
+      });
+      setSuggestedArtists((sortedArtists.length > 0 ? sortedArtists : fallbackArtists).slice(0, 10));
       cacheSongs([...mixedSuggested, ...mixedMostPlayed]);
     } finally {
       loadingSuggestedRef.current = false;
@@ -183,11 +372,22 @@ export const HomeScreen = () => {
       songsLoadingRef.current = true;
       setSongsLoading(true);
       try {
-        const response = await searchSongs("top songs", page);
-        const mergedItems = uniqueById(response.items);
+        const baseQueries = page === 1 ? SONG_DISCOVERY_QUERIES : SONG_FEED_BASE_QUERIES;
+        const queries = page === 1 ? pickQueryWindow(baseQueries, page, 8) : pickQueryWindow(baseQueries, page, 4);
+        const settled = await Promise.allSettled(queries.map((query) => searchSongs(query, page)));
+        const merged = mergePaginatedItems<Song>(
+          settled as PromiseSettledResult<{ items: Song[]; total: number; hasMore: boolean }>[]
+        );
+        const buckets: Song[][] = [];
+        settled.forEach((result) => {
+          if (result.status === "fulfilled") {
+            buckets.push(result.value.items);
+          }
+        });
+        const mergedItems = interleaveBuckets(buckets, songDiversityKey, 120);
         cacheSongs(mergedItems);
-        setSongsTotal(response.total);
-        setSongsHasMore(response.hasMore);
+        setSongsTotal(merged.total || mergedItems.length);
+        setSongsHasMore(merged.hasMore);
         setSongsPage(page);
         setSongs((prev) => (page === 1 ? mergedItems : uniqueById([...prev, ...mergedItems])));
       } finally {
@@ -199,7 +399,13 @@ export const HomeScreen = () => {
   );
 
   const enrichArtistsWithStats = useCallback(async (items: Artist[]): Promise<Artist[]> => {
-    const missingStats = items.filter((item) => item.albumCount === undefined || item.songCount === undefined);
+    if (Platform.OS === "web") {
+      return items;
+    }
+
+    const missingStats = items
+      .filter((item) => item.albumCount === undefined || item.songCount === undefined)
+      .slice(0, 12);
     if (missingStats.length === 0) {
       return items;
     }
@@ -234,11 +440,22 @@ export const HomeScreen = () => {
       artistsLoadingRef.current = true;
       setArtistsLoading(true);
       try {
-        const response = await searchArtists(ARTISTS_DISCOVERY_QUERY, page);
-        const mergedItems = uniqueById(response.items);
+        const baseQueries = page === 1 ? ARTIST_DISCOVERY_QUERIES : [ARTISTS_DISCOVERY_QUERY];
+        const queries = page === 1 ? pickQueryWindow(baseQueries, page, 8) : pickQueryWindow(baseQueries, page, 4);
+        const settled = await Promise.allSettled(queries.map((query) => searchArtists(query, page)));
+        const merged = mergePaginatedItems<Artist>(
+          settled as PromiseSettledResult<{ items: Artist[]; total: number; hasMore: boolean }>[]
+        );
+        const buckets: Artist[][] = [];
+        settled.forEach((result) => {
+          if (result.status === "fulfilled") {
+            buckets.push(result.value.items);
+          }
+        });
+        const mergedItems = interleaveBuckets(buckets, artistDiversityKey, 120);
         const enrichedItems = await enrichArtistsWithStats(mergedItems);
-        setArtistsTotal(response.total);
-        setArtistsHasMore(response.hasMore);
+        setArtistsTotal(merged.total || enrichedItems.length);
+        setArtistsHasMore(merged.hasMore);
         setArtistsPage(page);
         setArtists((prev) => (page === 1 ? enrichedItems : uniqueById([...prev, ...enrichedItems])));
       } finally {
@@ -257,10 +474,21 @@ export const HomeScreen = () => {
       albumsLoadingRef.current = true;
       setAlbumsLoading(true);
       try {
-        const response = await searchAlbums(ALBUMS_DISCOVERY_QUERY, page);
-        const mergedItems = uniqueById(response.items);
-        setAlbumsTotal(response.total);
-        setAlbumsHasMore(response.hasMore);
+        const baseQueries = page === 1 ? ALBUM_DISCOVERY_QUERIES : [ALBUMS_DISCOVERY_QUERY, "top albums"];
+        const queries = page === 1 ? pickQueryWindow(baseQueries, page, 8) : pickQueryWindow(baseQueries, page, 4);
+        const settled = await Promise.allSettled(queries.map((query) => searchAlbums(query, page)));
+        const merged = mergePaginatedItems<Album>(
+          settled as PromiseSettledResult<{ items: Album[]; total: number; hasMore: boolean }>[]
+        );
+        const buckets: Album[][] = [];
+        settled.forEach((result) => {
+          if (result.status === "fulfilled") {
+            buckets.push(result.value.items);
+          }
+        });
+        const mergedItems = interleaveBuckets(buckets, albumDiversityKey, 120);
+        setAlbumsTotal(merged.total || mergedItems.length);
+        setAlbumsHasMore(merged.hasMore);
         setAlbumsPage(page);
         setAlbums((prev) => (page === 1 ? mergedItems : uniqueById([...prev, ...mergedItems])));
       } finally {
@@ -325,6 +553,7 @@ export const HomeScreen = () => {
     }
     const isDownloaded = Boolean(downloaded[songSheet.id]);
     const favorite = isFavorite(songSheet.id);
+    const blacklisted = isBlacklistedSong(songSheet.id);
     return [
       {
         id: "next",
@@ -343,30 +572,18 @@ export const HomeScreen = () => {
         label: "Go to Album",
         icon: "disc-outline" as const,
         onPress: () => {
-          navigation.navigate("AlbumDetails", {
-            album: {
-              id: songSheet.albumId ?? songSheet.id,
-              name: songSheet.albumName ?? "Album",
-              artistName: songSheet.artist,
-              image: songSheet.image,
-              year: songSheet.year,
-            },
-          });
+          const album = buildAlbumFromSong(songSheet);
+          if (!album) {
+            return;
+          }
+          navigation.navigate("AlbumDetails", { album });
         },
       },
       {
         id: "artist",
         label: "Go to Artist",
         icon: "person-outline" as const,
-        onPress: () => {
-          navigation.navigate("ArtistDetails", {
-            artist: {
-              id: songSheet.artistId ?? songSheet.id,
-              name: songSheet.artist,
-              image: songSheet.image,
-            },
-          });
-        },
+        onPress: () => navigation.navigate("ArtistDetails", { artist: buildArtistFromSong(songSheet) }),
       },
       {
         id: "favorite",
@@ -382,15 +599,30 @@ export const HomeScreen = () => {
       },
       {
         id: "download",
-        label: isDownloaded ? "Delete from Device" : "Download Offline",
-        icon: isDownloaded ? ("trash-outline" as const) : ("download-outline" as const),
+        label: "Download Offline",
+        icon: "download-outline" as const,
         onPress: () => {
-          if (isDownloaded) {
-            void removeDownload(songSheet.id);
-          } else {
-            void downloadSong(songSheet);
-          }
+          void downloadSong(songSheet);
         },
+      },
+      {
+        id: "details",
+        label: "Details",
+        icon: "information-circle-outline" as const,
+        onPress: () => showSongDetails(songSheet),
+      },
+      {
+        id: "ringtone",
+        label: "Set as Ringtone",
+        icon: "call-outline" as const,
+        onPress: () => showSetAsRingtoneHint(songSheet),
+      },
+      {
+        id: "blacklist",
+        label: blacklisted ? "Remove from Blacklist" : "Add to Blacklist",
+        icon: blacklisted ? ("close-circle-outline" as const) : ("ban-outline" as const),
+        active: blacklisted,
+        onPress: () => toggleBlacklistSong(songSheet),
       },
       {
         id: "share",
@@ -400,16 +632,28 @@ export const HomeScreen = () => {
           void shareSong(songSheet);
         },
       },
+      {
+        id: "delete-device",
+        label: "Delete from Device",
+        icon: "trash-outline" as const,
+        onPress: () => {
+          if (isDownloaded) {
+            void removeDownload(songSheet.id);
+          }
+        },
+      },
     ];
   }, [
     addPlayNext,
     addToQueue,
     downloaded,
     downloadSong,
+    isBlacklistedSong,
     isFavorite,
     navigation,
     removeDownload,
     songSheet,
+    toggleBlacklistSong,
     toggleFavorite,
   ]);
 
@@ -536,51 +780,54 @@ export const HomeScreen = () => {
 
   const renderSuggested = () => (
     <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.pageBottomPad}>
-      <View style={styles.sectionWrap}>
-        <SectionHeader title="Recently Played" colors={colors} />
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hRow}>
-          {recentList.map((song, index) => (
-            <Pressable key={song.id} style={styles.squareItem} onPress={() => void playFromList(recentList, index)}>
-              <Image source={{ uri: song.image }} style={styles.squareCover} />
-              <Text numberOfLines={2} style={[styles.squareLabel, { color: colors.text }]}>
-                {song.title}
-              </Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-      </View>
+      {[
+        { title: "Recently Played", songs: recentList },
+        { title: "Most Played", songs: mostPlayed },
+        { title: "New For You", songs: newForYouSongs },
+        { title: "Downloaded Mix", songs: downloadedMixSongs },
+        { title: "On Repeat", songs: onRepeatSongs },
+      ].map((section) => (
+        <View key={section.title} style={styles.sectionWrap}>
+          <SectionHeader title={section.title} colors={colors} />
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hRow}>
+            {section.songs.map((song, index) => (
+              <Pressable
+                key={`${section.title}-${song.id}`}
+                style={styles.squareItem}
+                onPress={() => void playFromList(section.songs, index)}
+              >
+                <Image source={{ uri: song.image }} style={styles.squareCover} />
+                <Text numberOfLines={2} style={[styles.squareLabel, { color: colors.text }]}>
+                  {song.title}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      ))}
 
-      <View style={styles.sectionWrap}>
-        <SectionHeader title="Artists" colors={colors} />
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hRow}>
-          {suggestedArtists.map((artist) => (
-            <Pressable
-              key={artist.id}
-              style={styles.circleItem}
-              onPress={() => navigation.navigate("ArtistDetails", { artist })}
-            >
-              <Image source={{ uri: artist.image }} style={styles.circleCover} />
-              <Text numberOfLines={1} style={[styles.squareLabel, { color: colors.text }]}>
-                {artist.name}
-              </Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-      </View>
-
-      <View style={styles.sectionWrap}>
-        <SectionHeader title="Most Played" colors={colors} />
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hRow}>
-          {mostPlayed.map((song, index) => (
-            <Pressable key={song.id} style={styles.squareItem} onPress={() => void playFromList(mostPlayed, index)}>
-              <Image source={{ uri: song.image }} style={styles.squareCover} />
-              <Text numberOfLines={2} style={[styles.squareLabel, { color: colors.text }]}>
-                {song.title}
-              </Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-      </View>
+      {[
+        { title: "Artists", artists: suggestedArtists },
+        { title: "Artist Spotlight", artists: artistSpotlight },
+      ].map((section) => (
+        <View key={section.title} style={styles.sectionWrap}>
+          <SectionHeader title={section.title} colors={colors} />
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hRow}>
+            {section.artists.map((artist) => (
+              <Pressable
+                key={`${section.title}-${artist.id}`}
+                style={styles.circleItem}
+                onPress={() => navigation.navigate("ArtistDetails", { artist })}
+              >
+                <Image source={{ uri: artist.image }} style={styles.circleCover} />
+                <Text numberOfLines={1} style={[styles.squareLabel, { color: colors.text }]}>
+                  {artist.name}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      ))}
 
       {loadingSuggested ? (
         <View style={styles.loaderWrap}>
@@ -712,6 +959,13 @@ export const HomeScreen = () => {
 
   const renderFolders = () => {
     if (downloadedSongs.length === 0) {
+      if (Object.keys(downloaded).length > 0) {
+        return (
+          <View style={styles.loaderWrap}>
+            <ActivityIndicator color={colors.accent} />
+          </View>
+        );
+      }
       return (
         <EmptyState
           colors={colors}
@@ -786,7 +1040,7 @@ export const HomeScreen = () => {
         colors={colors}
         image={playlistPickerSong?.image}
         title="Add to Playlist"
-        subtitle={playlistPickerSong ? `${playlistPickerSong.title} - ${playlistPickerSong.artist}` : undefined}
+        subtitle={playlistPickerSong ? formatSongByline(playlistPickerSong.title, playlistPickerSong.artist) : undefined}
         actions={playlistActions}
       />
 
@@ -796,11 +1050,7 @@ export const HomeScreen = () => {
         colors={colors}
         image={artistSheet?.image}
         title={artistSheet?.name}
-        subtitle={
-          artistSheet
-            ? `${(artistSheet.albumCount ?? 0).toString()} Album   |   ${(artistSheet.songCount ?? 0).toString()} Songs`
-            : undefined
-        }
+        subtitle={artistSheet ? formatArtistStatsFrom(artistSheet) : undefined}
         actions={artistActions}
       />
 

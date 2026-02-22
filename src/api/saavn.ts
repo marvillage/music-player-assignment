@@ -5,11 +5,28 @@ import { pickBestImage } from "../utils/image";
 const BASE_URL = Platform.OS === "web" ? "http://localhost:8787" : "https://saavn.sumit.co";
 const PAGE_SIZE = 20;
 const MAX_RETRIES = 2;
-const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
+const failedArtistDetailIds = new Set<string>();
 
 type AnyObject = Record<string, any>;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const normalizeToken = (value: unknown): string =>
+  String(value ?? "")
+    .toLowerCase()
+    .replace(/&[^;\s]+;/g, " ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64);
+
+const buildStableId = (prefix: string, ...parts: unknown[]): string => {
+  const key = parts
+    .map((part) => normalizeToken(part))
+    .filter((part) => part.length > 0)
+    .join("-");
+  return key.length > 0 ? `${prefix}-${key}` : `${prefix}-unknown`;
+};
 
 const toNumber = (value: unknown): number => {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -86,6 +103,18 @@ const sanitizeId = (value: unknown): string | undefined => {
   return normalized;
 };
 
+const extractIdFromUrl = (value: unknown): string | undefined => {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return undefined;
+  }
+
+  const match = value.match(/\/([0-9]{4,})[_/?#]?/);
+  if (!match) {
+    return undefined;
+  }
+  return sanitizeId(match[1]);
+};
+
 const extractArtistName = (raw: AnyObject): string => {
   if (typeof raw.primaryArtists === "string" && raw.primaryArtists.trim().length > 0) {
     return decodeHtmlEntities(raw.primaryArtists).trim();
@@ -119,7 +148,29 @@ const extractArtistId = (raw: AnyObject): string | undefined => {
     }
   }
 
-  return sanitizeId(raw.artistId);
+  const allArtists = raw.artists?.all;
+  if (Array.isArray(allArtists) && allArtists.length > 0) {
+    const firstAllId = sanitizeId(allArtists[0]?.id);
+    if (firstAllId) {
+      return firstAllId;
+    }
+  }
+
+  return sanitizeId(raw.artistId) ?? extractIdFromUrl(raw.url);
+};
+
+const extractSongAlbumId = (raw: AnyObject): string | undefined =>
+  sanitizeId(raw.album?.id) ??
+  sanitizeId(raw.albumId) ??
+  sanitizeId(raw.albumid) ??
+  sanitizeId(raw.more_info?.album_id);
+
+const extractSongAlbumName = (raw: AnyObject): string | undefined => {
+  const direct = raw.album?.name ?? raw.albumName ?? raw.album;
+  if (typeof direct !== "string" || direct.trim().length === 0) {
+    return undefined;
+  }
+  return decodeHtmlEntities(direct).trim();
 };
 
 const extractAlbumArtistName = (raw: AnyObject): string => {
@@ -153,12 +204,20 @@ const normalizeSong = (raw: AnyObject): Song => {
     : [];
 
   return {
-    id: String(raw.id ?? ""),
+    id:
+      sanitizeId(raw.id) ??
+      buildStableId(
+        "song",
+        raw.name,
+        raw.primaryArtists ?? raw.artist,
+        raw.album?.name ?? raw.albumName,
+        raw.year
+      ),
     title: decodeHtmlEntities(raw.name ?? "Unknown Song"),
     artist: extractArtistName(raw),
     artistId: extractArtistId(raw),
-    albumId: raw.album?.id ? String(raw.album.id) : undefined,
-    albumName: raw.album?.name ? decodeHtmlEntities(raw.album.name) : undefined,
+    albumId: extractSongAlbumId(raw),
+    albumName: extractSongAlbumName(raw),
     year: raw.year ? String(raw.year) : undefined,
     language: raw.language ? String(raw.language) : undefined,
     durationSec: toNumber(raw.duration),
@@ -167,29 +226,41 @@ const normalizeSong = (raw: AnyObject): Song => {
   };
 };
 
-const normalizeArtist = (raw: AnyObject): Artist => ({
-  id: String(raw.id ?? ""),
-  name: decodeHtmlEntities(raw.name ?? "Unknown Artist"),
-  image: pickBestImage(raw.image),
-  albumCount: toOptionalNumber(raw.albumCount ?? raw.albums ?? raw.topAlbums?.length),
-  songCount: toOptionalNumber(raw.songCount ?? raw.songs ?? raw.topSongs?.length),
-  subtitle:
-    typeof raw.subtitle === "string"
-      ? decodeHtmlEntities(raw.subtitle)
-      : raw.description
-      ? decodeHtmlEntities(raw.description)
-      : undefined,
-});
+const normalizeArtist = (raw: AnyObject): Artist => {
+  const name = decodeHtmlEntities(raw.name ?? "Unknown Artist");
+  return {
+    id: sanitizeId(raw.id) ?? sanitizeId(raw.artistId) ?? extractIdFromUrl(raw.url) ?? buildStableId("artist", name),
+    name,
+    image: pickBestImage(raw.image),
+    albumCount: toOptionalNumber(raw.albumCount ?? raw.albums ?? raw.topAlbums?.length),
+    songCount: toOptionalNumber(raw.songCount ?? raw.songs ?? raw.topSongs?.length),
+    subtitle:
+      typeof raw.subtitle === "string"
+        ? decodeHtmlEntities(raw.subtitle)
+        : raw.description
+        ? decodeHtmlEntities(raw.description)
+        : undefined,
+  };
+};
 
-const normalizeAlbum = (raw: AnyObject): Album => ({
-  id: String(raw.id ?? ""),
-  name: decodeHtmlEntities(raw.name ?? "Unknown Album"),
-  image: pickBestImage(raw.image),
-  artistName: extractAlbumArtistName(raw),
-  year: raw.year ? String(raw.year) : undefined,
-  songCount: toNumber(raw.songCount ?? raw.songs),
-  subtitle: raw.language ? `${decodeHtmlEntities(raw.language)} music` : undefined,
-});
+const normalizeAlbum = (raw: AnyObject): Album => {
+  const name = decodeHtmlEntities(raw.name ?? "Unknown Album");
+  const artistName = extractAlbumArtistName(raw);
+  return {
+    id:
+      sanitizeId(raw.id) ??
+      sanitizeId(raw.albumId) ??
+      sanitizeId(raw.albumid) ??
+      extractIdFromUrl(raw.url) ??
+      buildStableId("album", name, artistName, raw.year),
+    name,
+    image: pickBestImage(raw.image),
+    artistName,
+    year: raw.year ? String(raw.year) : undefined,
+    songCount: toNumber(raw.songCount ?? raw.songs),
+    subtitle: raw.language ? `${decodeHtmlEntities(raw.language)} music` : undefined,
+  };
+};
 
 const unwrapData = (json: AnyObject): AnyObject => {
   if (json?.data && typeof json.data === "object") {
@@ -229,25 +300,15 @@ const fetchJson = async (path: string, params: Record<string, string | number | 
 
   let lastError = "Unknown error";
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+    let response: Response;
     try {
-      const response = await fetch(url.toString(), {
+      response = await fetch(url.toString(), {
         headers: { accept: "application/json" },
       });
-
-      if (response.ok) {
-        return (await response.json()) as AnyObject;
-      }
-
-      lastError = `API error ${response.status}`;
-      if (attempt < MAX_RETRIES && RETRYABLE_STATUS.has(response.status)) {
-        await sleep(400 * (attempt + 1));
-        continue;
-      }
-      throw new Error(lastError);
     } catch (error) {
       lastError = String(error);
       if (attempt < MAX_RETRIES) {
-        await sleep(350 * (attempt + 1));
+        await sleep(400 * (attempt + 1));
         continue;
       }
       const proxyHint =
@@ -256,6 +317,18 @@ const fetchJson = async (path: string, params: Record<string, string | number | 
           : "";
       throw new Error(`${lastError}${proxyHint}`);
     }
+
+    if (response.ok) {
+      return (await response.json()) as AnyObject;
+    }
+
+    lastError = `API error ${response.status}`;
+    if (attempt < MAX_RETRIES && RETRYABLE_STATUS.has(response.status)) {
+      await sleep(400 * (attempt + 1));
+      continue;
+    }
+
+    throw new Error(lastError);
   }
 
   throw new Error(lastError);
@@ -287,17 +360,37 @@ export const getSongById = async (id: string): Promise<Song | null> => {
 };
 
 export const getArtistById = async (id: string): Promise<Artist | null> => {
-  const json = await fetchJson(`/api/artists/${id}`);
-  const data = unwrapData(json);
-  if (!data || typeof data !== "object") {
+  const artistId = sanitizeId(id);
+  if (!artistId || failedArtistDetailIds.has(artistId)) {
     return null;
   }
-  return normalizeArtist(data);
+
+  try {
+    const json = await fetchJson(`/api/artists/${artistId}`);
+    const data = unwrapData(json);
+    if (!data || typeof data !== "object") {
+      failedArtistDetailIds.add(artistId);
+      return null;
+    }
+    return normalizeArtist(data);
+  } catch {
+    failedArtistDetailIds.add(artistId);
+    return null;
+  }
 };
 
 export const getArtistSongs = async (id: string, page = 1): Promise<PaginatedResult<Song>> => {
-  const json = await fetchJson(`/api/artists/${id}/songs`, { page, limit: PAGE_SIZE });
-  return normalizeListResponse(json, page, normalizeSong);
+  const artistId = sanitizeId(id);
+  if (!artistId) {
+    return { items: [], total: 0, page, hasMore: false };
+  }
+
+  try {
+    const json = await fetchJson(`/api/artists/${artistId}/songs`, { page, limit: PAGE_SIZE });
+    return normalizeListResponse(json, page, normalizeSong);
+  } catch {
+    return { items: [], total: 0, page, hasMore: false };
+  }
 };
 
 export const getAlbumById = async (id: string): Promise<{ album: Album | null; songs: Song[] }> => {
@@ -338,11 +431,25 @@ export const getAlbumSongs = async (album: Album): Promise<Song[]> => {
     // no-op
   }
 
+  const normalizedAlbumName = album.name.trim().toLowerCase();
+  if (!normalizedAlbumName || normalizedAlbumName === "album") {
+    return [];
+  }
+
+  const normalizedArtist = album.artistName.trim().toLowerCase();
   const search = await searchSongs(`${album.name} ${album.artistName}`, 1);
   return search.items.filter((song) => {
-    if (!song.albumId) {
+    const byAlbumId = Boolean(song.albumId && song.albumId === album.id);
+    const byAlbumName = song.albumName?.trim().toLowerCase() === normalizedAlbumName;
+    if (byAlbumId) {
+      return true;
+    }
+    if (!byAlbumName) {
       return false;
     }
-    return song.albumId === album.id || song.albumName?.toLowerCase() === album.name.toLowerCase();
+    if (!normalizedArtist) {
+      return true;
+    }
+    return song.artist.toLowerCase().includes(normalizedArtist);
   });
 };
