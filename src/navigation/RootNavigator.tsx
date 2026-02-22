@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import { BlurView } from "expo-blur";
 import { NavigationContainer, DefaultTheme } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
@@ -44,7 +43,7 @@ const getTabIcon = (
 type MainTabsProps = NativeStackScreenProps<RootStackParamList, "MainTabs">;
 
 const MainTabs = ({ navigation }: MainTabsProps) => {
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
 
   return (
     <View style={[styles.mainTabsRoot, { backgroundColor: colors.background }]}>
@@ -55,8 +54,9 @@ const MainTabs = ({ navigation }: MainTabsProps) => {
           tabBarInactiveTintColor: colors.textSecondary,
           tabBarLabelStyle: styles.tabLabel,
           tabBarStyle: {
-            backgroundColor: "transparent",
-            borderTopWidth: 0,
+            backgroundColor: colors.tabBar,
+            borderTopColor: colors.border,
+            borderTopWidth: 1,
             elevation: 0,
             height: 74,
             paddingBottom: 10,
@@ -65,13 +65,6 @@ const MainTabs = ({ navigation }: MainTabsProps) => {
           },
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons name={getTabIcon(route.name, focused)} color={color} size={focused ? size + 1 : size} />
-          ),
-          tabBarBackground: () => (
-            <BlurView
-              intensity={isDark ? 30 : 70}
-              tint={isDark ? "dark" : "light"}
-              style={[styles.tabBlur, { backgroundColor: colors.tabBar }]}
-            />
           ),
         })}
       >
@@ -131,12 +124,6 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_500Medium",
     fontSize: 11,
     paddingBottom: 2,
-  },
-  tabBlur: {
-    borderTopLeftRadius: 26,
-    borderTopRightRadius: 26,
-    flex: 1,
-    overflow: "hidden",
   },
   miniPlayer: {
     bottom: 74,

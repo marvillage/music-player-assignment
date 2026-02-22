@@ -27,7 +27,7 @@ export const SettingsScreen = () => {
 
   return (
     <SafeAreaView
-      style={[styles.safe, { backgroundColor: colors.background, paddingTop: Math.max(insets.top, 10) }]}
+      style={[styles.safe, { backgroundColor: colors.background, paddingTop: Math.max(insets.top, 20) }]}
       edges={["left", "right", "bottom"]}
     >
       <Text style={[styles.title, { color: colors.text }]}>Settings</Text>

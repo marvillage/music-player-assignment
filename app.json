@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Mume",
-    "slug": "mume",
+    "slug": "lokal-music",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -32,10 +32,6 @@
         "WAKE_LOCK",
         "FOREGROUND_SERVICE",
         "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS",
-        "WAKE_LOCK",
-        "FOREGROUND_SERVICE",
-        "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
       "package": "com.marvillage.lokalmusic"
@@ -57,6 +53,7 @@
     },
     "updates": {
       "url": "https://u.expo.dev/d2621a9a-73ef-4d4f-b387-84b913c50b56"
-    }
+    },
+    "owner": "marvillage"
   }
 }

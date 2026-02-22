@@ -1,6 +1,7 @@
 import * as FileSystem from "expo-file-system/legacy";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create, createJSONStorage, persist } from "./zustandCompat";
+import { Platform } from "react-native";
 
 import type { Playlist, Song } from "../types/music";
 import { pickHighestQualityUrl } from "../utils/image";
@@ -36,6 +37,7 @@ const DEFAULT_PLAYLIST: Playlist = {
 };
 
 const DOWNLOAD_DIR = `${FileSystem.documentDirectory ?? ""}downloads/`;
+const IS_WEB = Platform.OS === "web";
 
 export const useLibraryStore = create<LibraryState>()(
   persist(
@@ -176,25 +178,38 @@ export const useLibraryStore = create<LibraryState>()(
           return null;
         }
 
-        try {
-          await FileSystem.makeDirectoryAsync(DOWNLOAD_DIR, { intermediates: true });
-        } catch {
-          // no-op
+        if (IS_WEB || typeof FileSystem.downloadAsync !== "function") {
+          // Web doesn't support expo-file-system downloads; keep a playable URL fallback.
+          set((state) => ({
+            downloaded: { ...state.downloaded, [song.id]: streamUrl },
+            songCache: { ...state.songCache, [song.id]: song },
+          }));
+          return streamUrl;
         }
 
-        const target = `${DOWNLOAD_DIR}${song.id}.mp4`;
-        const result = await FileSystem.downloadAsync(streamUrl, target);
+        try {
+          try {
+            await FileSystem.makeDirectoryAsync(DOWNLOAD_DIR, { intermediates: true });
+          } catch {
+            // no-op
+          }
 
-        set((state) => ({
-          downloaded: { ...state.downloaded, [song.id]: result.uri },
-          songCache: { ...state.songCache, [song.id]: song },
-        }));
+          const target = `${DOWNLOAD_DIR}${song.id}.mp4`;
+          const result = await FileSystem.downloadAsync(streamUrl, target);
 
-        return result.uri;
+          set((state) => ({
+            downloaded: { ...state.downloaded, [song.id]: result.uri },
+            songCache: { ...state.songCache, [song.id]: song },
+          }));
+
+          return result.uri;
+        } catch {
+          return null;
+        }
       },
       removeDownload: async (songId) => {
         const uri = get().downloaded[songId];
-        if (uri) {
+        if (uri && !IS_WEB) {
           try {
             await FileSystem.deleteAsync(uri, { idempotent: true });
           } catch {

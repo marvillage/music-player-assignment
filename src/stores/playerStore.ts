@@ -264,19 +264,54 @@ export const usePlayerStore = create<PlayerState>()(
       },
       addToQueue: (song) => {
         useLibraryStore.getState().cacheSongs([song]);
-        set((state) => ({ queue: [...state.queue, song] }));
+        let shouldAutoplay = false;
+        let autoplayIndex = 0;
+        set((state) => {
+          if (state.queue.length === 0) {
+            shouldAutoplay = true;
+            autoplayIndex = 0;
+            return { queue: [song], currentIndex: 0 };
+          }
+
+          const nextQueue = [...state.queue, song];
+          if (state.currentIndex < 0) {
+            shouldAutoplay = true;
+            autoplayIndex = 0;
+            return { queue: nextQueue, currentIndex: 0 };
+          }
+
+          return { queue: nextQueue };
+        });
+        if (shouldAutoplay) {
+          void get().playFromQueue(autoplayIndex, true);
+        }
       },
       addPlayNext: (song) => {
         useLibraryStore.getState().cacheSongs([song]);
+        let shouldAutoplay = false;
+        let autoplayIndex = 0;
         set((state) => {
-          if (state.currentIndex < 0) {
+          if (state.queue.length === 0) {
+            shouldAutoplay = true;
+            autoplayIndex = 0;
             return { queue: [song], currentIndex: 0 };
           }
-          const at = state.currentIndex + 1;
+
           const copy = [...state.queue];
+          if (state.currentIndex < 0) {
+            shouldAutoplay = true;
+            autoplayIndex = 0;
+            copy.splice(0, 0, song);
+            return { queue: copy, currentIndex: 0 };
+          }
+
+          const at = state.currentIndex + 1;
           copy.splice(at, 0, song);
           return { queue: copy };
         });
+        if (shouldAutoplay) {
+          void get().playFromQueue(autoplayIndex, true);
+        }
       },
       moveQueueItem: (from, to) =>
         set((state) => {

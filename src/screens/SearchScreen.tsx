@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { NavigationProp } from "@react-navigation/native";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -14,7 +14,7 @@ import {
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { getArtistSongs, searchAlbums, searchArtists, searchSongs } from "../api/saavn";
+import { getArtistById, getArtistSongs, searchAlbums, searchArtists, searchSongs } from "../api/saavn";
 import { AlbumCard } from "../components/AlbumCard";
 import { ArtistRow } from "../components/ArtistRow";
 import { BottomSheet } from "../components/BottomSheet";
@@ -144,6 +144,34 @@ export const SearchScreen = () => {
   const [artistSheet, setArtistSheet] = useState<Artist | null>(null);
   const [clearSearchConfirmVisible, setClearSearchConfirmVisible] = useState(false);
 
+  const enrichArtistsWithStats = useCallback(async (items: Artist[]): Promise<Artist[]> => {
+    const missingStats = items.filter((item) => item.albumCount === undefined || item.songCount === undefined);
+    if (missingStats.length === 0) {
+      return items;
+    }
+
+    const detailResults = await Promise.allSettled(missingStats.map((item) => getArtistById(item.id)));
+    const detailById = new Map<string, Artist>();
+    detailResults.forEach((result, index) => {
+      if (result.status !== "fulfilled" || !result.value) {
+        return;
+      }
+      detailById.set(missingStats[index].id, result.value);
+    });
+
+    return items.map((item) => {
+      const detail = detailById.get(item.id);
+      if (!detail) {
+        return item;
+      }
+      return {
+        ...item,
+        albumCount: item.albumCount ?? detail.albumCount ?? 0,
+        songCount: item.songCount ?? detail.songCount ?? 0,
+      };
+    });
+  }, []);
+
   const trendingQueries = useMemo(() => {
     const tracked = topSearches(8);
     return [...new Set([...tracked, ...TRENDING_FALLBACK])].slice(0, 10);
@@ -181,7 +209,8 @@ export const SearchScreen = () => {
           }
         } else if (category === "Artists") {
           const res = await searchArtists(trimmed, 1);
-          setArtists(res.items);
+          const enriched = await enrichArtistsWithStats(res.items);
+          setArtists(enriched);
         } else {
           const res = await searchAlbums(trimmed, 1);
           setAlbums(res.items);
@@ -192,7 +221,7 @@ export const SearchScreen = () => {
     }, 350);
 
     return () => clearTimeout(timer);
-  }, [cacheSongs, category, query, recentSearches, trendingQueries]);
+  }, [cacheSongs, category, enrichArtistsWithStats, query, recentSearches, trendingQueries]);
 
   const folderSongs = useMemo(() => songs.filter((song) => Boolean(downloaded[song.id])), [downloaded, songs]);
   const displayedSongs = useMemo(() => {
@@ -584,7 +613,7 @@ export const SearchScreen = () => {
 
   return (
     <SafeAreaView
-      style={[styles.safe, { backgroundColor: colors.background, paddingTop: Math.max(insets.top, 10) }]}
+      style={[styles.safe, { backgroundColor: colors.background, paddingTop: Math.max(insets.top, 20) }]}
       edges={["left", "right", "bottom"]}
     >
       <View style={styles.searchRow}>
@@ -659,7 +688,11 @@ export const SearchScreen = () => {
         colors={colors}
         image={artistSheet?.image}
         title={artistSheet?.name}
-        subtitle={artistSheet ? `${artistSheet.albumCount ?? 0} Album   |   ${artistSheet.songCount ?? 0} Songs` : undefined}
+        subtitle={
+          artistSheet
+            ? `${(artistSheet.albumCount ?? 0).toString()} Album   |   ${(artistSheet.songCount ?? 0).toString()} Songs`
+            : undefined
+        }
         actions={artistActions}
       />
 

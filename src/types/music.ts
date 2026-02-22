@@ -7,6 +7,7 @@ export type Song = {
   id: string;
   title: string;
   artist: string;
+  artistId?: string;
   albumId?: string;
   albumName?: string;
   year?: string;

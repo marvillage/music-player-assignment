@@ -53,9 +53,21 @@ export const AlbumDetailsScreen = () => {
     (async () => {
       setLoading(true);
       try {
-        const details = await getAlbumById(route.params.album.id);
-        const fallbackAlbum = details.album ?? route.params.album;
-        const list = details.songs.length ? details.songs : await getAlbumSongs(fallbackAlbum);
+        let fallbackAlbum = route.params.album;
+        let list: Song[] = [];
+
+        try {
+          const details = await getAlbumById(route.params.album.id);
+          fallbackAlbum = details.album ?? route.params.album;
+          list = details.songs;
+        } catch {
+          // Fall back to search-based lookup when detail endpoint fails.
+        }
+
+        if (list.length === 0) {
+          list = await getAlbumSongs(fallbackAlbum);
+        }
+
         if (!mounted) {
           return;
         }
@@ -202,7 +214,7 @@ export const AlbumDetailsScreen = () => {
         onPress: () =>
           navigation.navigate("ArtistDetails", {
             artist: {
-              id: songSheet.id,
+              id: songSheet.artistId ?? songSheet.id,
               name: songSheet.artist,
               image: songSheet.image,
             },
@@ -398,6 +410,7 @@ export const AlbumDetailsScreen = () => {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
+    paddingTop: 12,
     paddingHorizontal: 20,
   },
   header: {

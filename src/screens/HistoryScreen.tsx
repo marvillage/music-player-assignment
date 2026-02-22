@@ -100,6 +100,7 @@ export const HistoryScreen = () => {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
+    paddingTop: 12,
     paddingHorizontal: 16,
   },
   header: {

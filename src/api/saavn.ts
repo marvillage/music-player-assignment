@@ -24,13 +24,120 @@ const toNumber = (value: unknown): number => {
   return 0;
 };
 
+const toOptionalNumber = (value: unknown): number | undefined => {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+    const parsed = Number.parseInt(trimmed, 10);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return undefined;
+};
+
+const decodeHtmlEntities = (value: unknown): string => {
+  const input = String(value ?? "");
+  if (!input.includes("&")) {
+    return input;
+  }
+
+  const namedEntities: Record<string, string> = {
+    amp: "&",
+    quot: '"',
+    apos: "'",
+    lt: "<",
+    gt: ">",
+  };
+
+  return input.replace(/&(#x?[0-9a-f]+|amp|quot|apos|lt|gt);/gi, (entity, code) => {
+    const normalized = String(code).toLowerCase();
+    if (normalized in namedEntities) {
+      return namedEntities[normalized];
+    }
+    if (normalized.startsWith("#x")) {
+      const parsed = Number.parseInt(normalized.slice(2), 16);
+      return Number.isFinite(parsed) ? String.fromCharCode(parsed) : entity;
+    }
+    if (normalized.startsWith("#")) {
+      const parsed = Number.parseInt(normalized.slice(1), 10);
+      return Number.isFinite(parsed) ? String.fromCharCode(parsed) : entity;
+    }
+    return entity;
+  });
+};
+
+const sanitizeId = (value: unknown): string | undefined => {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  const normalized = String(value).trim();
+  if (!normalized || normalized === "0" || normalized.toLowerCase() === "null") {
+    return undefined;
+  }
+  return normalized;
+};
+
 const extractArtistName = (raw: AnyObject): string => {
   if (typeof raw.primaryArtists === "string" && raw.primaryArtists.trim().length > 0) {
-    return raw.primaryArtists;
+    return decodeHtmlEntities(raw.primaryArtists).trim();
   }
   const primary = raw.artists?.primary;
   if (Array.isArray(primary) && primary.length > 0) {
-    return primary.map((item: AnyObject) => item?.name).filter(Boolean).join(", ");
+    const names = primary
+      .map((item: AnyObject) => decodeHtmlEntities(item?.name ?? "").trim())
+      .filter((name: string) => name.length > 0);
+    if (names.length > 0) {
+      return names.join(", ");
+    }
+  }
+  return "Unknown Artist";
+};
+
+const extractArtistId = (raw: AnyObject): string | undefined => {
+  const primary = raw.artists?.primary;
+  if (Array.isArray(primary) && primary.length > 0) {
+    const primaryId = sanitizeId(primary[0]?.id);
+    if (primaryId) {
+      return primaryId;
+    }
+  }
+
+  if (typeof raw.primaryArtistsId === "string" && raw.primaryArtistsId.trim().length > 0) {
+    const [first] = raw.primaryArtistsId.split(",");
+    const primaryId = sanitizeId(first);
+    if (primaryId) {
+      return primaryId;
+    }
+  }
+
+  return sanitizeId(raw.artistId);
+};
+
+const extractAlbumArtistName = (raw: AnyObject): string => {
+  if (typeof raw.primaryArtists === "string" && raw.primaryArtists.trim().length > 0) {
+    return decodeHtmlEntities(raw.primaryArtists).trim();
+  }
+  if (typeof raw.artist === "string" && raw.artist.trim().length > 0) {
+    return decodeHtmlEntities(raw.artist).trim();
+  }
+
+  const primary = raw.artists?.primary;
+  if (Array.isArray(primary) && primary.length > 0) {
+    const names = primary
+      .map((item: AnyObject) => decodeHtmlEntities(item?.name ?? "").trim())
+      .filter((name: string) => name.length > 0);
+    if (names.length > 0) {
+      return names.join(", ");
+    }
   }
   return "Unknown Artist";
 };
@@ -47,10 +154,11 @@ const normalizeSong = (raw: AnyObject): Song => {
 
   return {
     id: String(raw.id ?? ""),
-    title: String(raw.name ?? "Unknown Song"),
+    title: decodeHtmlEntities(raw.name ?? "Unknown Song"),
     artist: extractArtistName(raw),
+    artistId: extractArtistId(raw),
     albumId: raw.album?.id ? String(raw.album.id) : undefined,
-    albumName: raw.album?.name ? String(raw.album.name) : undefined,
+    albumName: raw.album?.name ? decodeHtmlEntities(raw.album.name) : undefined,
     year: raw.year ? String(raw.year) : undefined,
     language: raw.language ? String(raw.language) : undefined,
     durationSec: toNumber(raw.duration),
@@ -61,26 +169,26 @@ const normalizeSong = (raw: AnyObject): Song => {
 
 const normalizeArtist = (raw: AnyObject): Artist => ({
   id: String(raw.id ?? ""),
-  name: String(raw.name ?? "Unknown Artist"),
+  name: decodeHtmlEntities(raw.name ?? "Unknown Artist"),
   image: pickBestImage(raw.image),
-  albumCount: toNumber(raw?.dominantType === "artist" ? raw?.albumCount : raw?.albums),
-  songCount: toNumber(raw.songCount ?? raw.songs),
+  albumCount: toOptionalNumber(raw.albumCount ?? raw.albums ?? raw.topAlbums?.length),
+  songCount: toOptionalNumber(raw.songCount ?? raw.songs ?? raw.topSongs?.length),
   subtitle:
     typeof raw.subtitle === "string"
-      ? raw.subtitle
+      ? decodeHtmlEntities(raw.subtitle)
       : raw.description
-      ? String(raw.description)
+      ? decodeHtmlEntities(raw.description)
       : undefined,
 });
 
 const normalizeAlbum = (raw: AnyObject): Album => ({
   id: String(raw.id ?? ""),
-  name: String(raw.name ?? "Unknown Album"),
+  name: decodeHtmlEntities(raw.name ?? "Unknown Album"),
   image: pickBestImage(raw.image),
-  artistName: String(raw.primaryArtists ?? raw.artist ?? "Unknown Artist"),
+  artistName: extractAlbumArtistName(raw),
   year: raw.year ? String(raw.year) : undefined,
   songCount: toNumber(raw.songCount ?? raw.songs),
-  subtitle: raw.language ? `${String(raw.language)} music` : undefined,
+  subtitle: raw.language ? `${decodeHtmlEntities(raw.language)} music` : undefined,
 });
 
 const unwrapData = (json: AnyObject): AnyObject => {
@@ -193,7 +301,12 @@ export const getArtistSongs = async (id: string, page = 1): Promise<PaginatedRes
 };
 
 export const getAlbumById = async (id: string): Promise<{ album: Album | null; songs: Song[] }> => {
-  const json = await fetchJson(`/api/albums/${id}`);
+  const albumId = sanitizeId(id);
+  if (!albumId) {
+    return { album: null, songs: [] };
+  }
+
+  const json = await fetchJson("/api/albums", { id: albumId });
   const data = unwrapData(json);
   const albumRaw =
     (data.album as AnyObject | undefined) ??
@@ -204,8 +317,13 @@ export const getAlbumById = async (id: string): Promise<{ album: Album | null; s
     ? data.results
     : [];
 
+  const album = albumRaw ? normalizeAlbum(albumRaw) : null;
+  if (!album || album.id !== albumId) {
+    return { album: null, songs: [] };
+  }
+
   return {
-    album: albumRaw ? normalizeAlbum(albumRaw) : null,
+    album,
     songs: songsRaw.map((item: AnyObject) => normalizeSong(item)),
   };
 };

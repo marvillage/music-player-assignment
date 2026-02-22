@@ -32,7 +32,7 @@ export const FavoritesScreen = () => {
   if (items.length === 0) {
     return (
       <SafeAreaView
-        style={[styles.safe, { backgroundColor: colors.background, paddingTop: Math.max(insets.top, 10) }]}
+        style={[styles.safe, { backgroundColor: colors.background, paddingTop: Math.max(insets.top, 20) }]}
         edges={["left", "right", "bottom"]}
       >
         <EmptyState
@@ -47,7 +47,7 @@ export const FavoritesScreen = () => {
 
   return (
     <SafeAreaView
-      style={[styles.safe, { backgroundColor: colors.background, paddingTop: Math.max(insets.top, 10) }]}
+      style={[styles.safe, { backgroundColor: colors.background, paddingTop: Math.max(insets.top, 20) }]}
       edges={["left", "right", "bottom"]}
     >
       <View style={styles.header}>

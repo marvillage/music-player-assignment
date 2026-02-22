@@ -148,7 +148,7 @@ export const PlayerScreen = () => {
         onPress: () =>
           navigation.navigate("ArtistDetails", {
             artist: {
-              id: song.id,
+              id: song.artistId ?? song.id,
               name: song.artist,
               image: song.image,
             },
@@ -310,26 +310,43 @@ export const PlayerScreen = () => {
       </View>
 
       <Image source={{ uri: song.image }} style={styles.cover} />
-      <Text numberOfLines={1} style={[styles.title, { color: colors.text }]}>
+      <Text
+        numberOfLines={2}
+        adjustsFontSizeToFit
+        minimumFontScale={0.82}
+        style={[styles.title, { color: colors.text }]}
+      >
         {song.title}
       </Text>
       <Text numberOfLines={1} style={[styles.artist, { color: colors.textSecondary }]}>
         {song.artist}
       </Text>
       <View style={styles.songMetaActions}>
-        <Pressable onPress={() => toggleFavorite(song)} style={styles.metaActionButton}>
+        <Pressable
+          onPress={() => toggleFavorite(song)}
+          hitSlop={8}
+          style={[styles.metaActionButton, { backgroundColor: colors.surfaceMuted }]}
+        >
           <Ionicons name={isFavorite(song.id) ? "heart" : "heart-outline"} size={22} color={colors.accent} />
           <Text style={[styles.metaActionLabel, { color: colors.textSecondary }]}>
             {isFavorite(song.id) ? "Liked" : "Like"}
           </Text>
         </Pressable>
-        <Pressable onPress={() => addPlayNext(song)} style={styles.metaActionButton}>
-          <Ionicons name="play-skip-forward-outline" size={22} color={colors.text} />
+        <Pressable
+          onPress={() => addPlayNext(song)}
+          hitSlop={8}
+          style={[styles.metaActionButton, { backgroundColor: colors.surfaceMuted }]}
+        >
+          <Ionicons name="play-skip-forward-outline" size={22} color={colors.accent} />
           <Text style={[styles.metaActionLabel, { color: colors.textSecondary }]}>Play Next</Text>
         </Pressable>
-        <Pressable onPress={() => addToQueue(song)} style={styles.metaActionButton}>
-          <Ionicons name="list-circle-outline" size={22} color={colors.text} />
-          <Text style={[styles.metaActionLabel, { color: colors.textSecondary }]}>Add Queue</Text>
+        <Pressable
+          onPress={() => addToQueue(song)}
+          hitSlop={8}
+          style={[styles.metaActionButton, { backgroundColor: colors.surfaceMuted }]}
+        >
+          <Ionicons name="list-circle-outline" size={22} color={colors.accent} />
+          <Text style={[styles.metaActionLabel, { color: colors.textSecondary }]}>Add to Queue</Text>
         </Pressable>
       </View>
 
@@ -438,6 +455,7 @@ export const PlayerScreen = () => {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
+    paddingTop: 12,
     paddingHorizontal: 20,
   },
   emptyWrap: {
@@ -466,6 +484,8 @@ const styles = StyleSheet.create({
   title: {
     fontFamily: "Poppins_700Bold",
     fontSize: 46 / 1.5,
+    lineHeight: 38,
+    paddingHorizontal: 6,
     textAlign: "center",
   },
   artist: {
@@ -475,13 +495,18 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   songMetaActions: {
+    gap: 10,
     flexDirection: "row",
-    justifyContent: "space-around",
+    justifyContent: "space-between",
     marginBottom: 8,
+    marginTop: 6,
   },
   metaActionButton: {
     alignItems: "center",
-    minWidth: 88,
+    borderRadius: 14,
+    flex: 1,
+    minWidth: 96,
+    paddingVertical: 9,
   },
   metaActionLabel: {
     fontFamily: "Poppins_500Medium",

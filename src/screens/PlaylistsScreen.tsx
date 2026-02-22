@@ -124,7 +124,7 @@ export const PlaylistsScreen = () => {
   }, [deletePlaylist, favoritesCount, playlistMenu]);
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: colors.background, paddingTop: Math.max(insets.top, 10) }]} edges={["left", "right", "bottom"]}>
+    <SafeAreaView style={[styles.safe, { backgroundColor: colors.background, paddingTop: Math.max(insets.top, 20) }]} edges={["left", "right", "bottom"]}>
       <View style={styles.header}>
         <Text style={[styles.title, { color: colors.text }]}>Playlists</Text>
         <Pressable onPress={openCreateModal} style={[styles.createButton, { backgroundColor: colors.accent }]}>

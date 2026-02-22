@@ -14,7 +14,7 @@ import {
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { getArtistSongs, searchAlbums, searchArtists, searchSongs } from "../api/saavn";
+import { getArtistById, getArtistSongs, searchAlbums, searchArtists, searchSongs } from "../api/saavn";
 import { AlbumCard } from "../components/AlbumCard";
 import { AppHeader } from "../components/AppHeader";
 import { ArtistRow } from "../components/ArtistRow";
@@ -33,6 +33,8 @@ import { sortSongs } from "../utils/format";
 import { shareAlbum, shareArtist, shareSong } from "../utils/share";
 
 const HOME_TABS = ["Suggested", "Songs", "Artists", "Albums", "Folders"];
+const ARTISTS_DISCOVERY_QUERY = "top artists";
+const ALBUMS_DISCOVERY_QUERY = "top hindi albums";
 const SONG_SORT_OPTIONS: SortOption[] = [
   "Ascending",
   "Descending",
@@ -138,7 +140,7 @@ export const HomeScreen = () => {
         searchSongs("top hits", 1),
         searchSongs("english songs", 1),
         searchSongs("hindi songs", 1),
-        searchArtists("popular", 1),
+        searchArtists(ARTISTS_DISCOVERY_QUERY, 1),
       ]);
       const globalSongs = globalSongsResult.status === "fulfilled" ? globalSongsResult.value.items : [];
       const localSongs = localSongsResult.status === "fulfilled" ? localSongsResult.value.items : [];
@@ -156,7 +158,7 @@ export const HomeScreen = () => {
             return;
           }
           fallbackArtistsByName.set(key, {
-            id: `derived-${song.id}`,
+            id: song.artistId ?? `derived-${song.id}`,
             name: song.artist,
             image: song.image,
           });
@@ -196,6 +198,34 @@ export const HomeScreen = () => {
     [cacheSongs]
   );
 
+  const enrichArtistsWithStats = useCallback(async (items: Artist[]): Promise<Artist[]> => {
+    const missingStats = items.filter((item) => item.albumCount === undefined || item.songCount === undefined);
+    if (missingStats.length === 0) {
+      return items;
+    }
+
+    const detailResults = await Promise.allSettled(missingStats.map((item) => getArtistById(item.id)));
+    const detailById = new Map<string, Artist>();
+    detailResults.forEach((result, index) => {
+      if (result.status !== "fulfilled" || !result.value) {
+        return;
+      }
+      detailById.set(missingStats[index].id, result.value);
+    });
+
+    return items.map((item) => {
+      const detail = detailById.get(item.id);
+      if (!detail) {
+        return item;
+      }
+      return {
+        ...item,
+        albumCount: item.albumCount ?? detail.albumCount ?? 0,
+        songCount: item.songCount ?? detail.songCount ?? 0,
+      };
+    });
+  }, []);
+
   const loadArtists = useCallback(
     async (page: number) => {
       if (artistsLoadingRef.current) {
@@ -204,18 +234,19 @@ export const HomeScreen = () => {
       artistsLoadingRef.current = true;
       setArtistsLoading(true);
       try {
-        const response = await searchArtists("popular", page);
+        const response = await searchArtists(ARTISTS_DISCOVERY_QUERY, page);
         const mergedItems = uniqueById(response.items);
+        const enrichedItems = await enrichArtistsWithStats(mergedItems);
         setArtistsTotal(response.total);
         setArtistsHasMore(response.hasMore);
         setArtistsPage(page);
-        setArtists((prev) => (page === 1 ? mergedItems : uniqueById([...prev, ...mergedItems])));
+        setArtists((prev) => (page === 1 ? enrichedItems : uniqueById([...prev, ...enrichedItems])));
       } finally {
         artistsLoadingRef.current = false;
         setArtistsLoading(false);
       }
     },
-    []
+    [enrichArtistsWithStats]
   );
 
   const loadAlbums = useCallback(
@@ -226,7 +257,7 @@ export const HomeScreen = () => {
       albumsLoadingRef.current = true;
       setAlbumsLoading(true);
       try {
-        const response = await searchAlbums("top albums", page);
+        const response = await searchAlbums(ALBUMS_DISCOVERY_QUERY, page);
         const mergedItems = uniqueById(response.items);
         setAlbumsTotal(response.total);
         setAlbumsHasMore(response.hasMore);
@@ -330,7 +361,7 @@ export const HomeScreen = () => {
         onPress: () => {
           navigation.navigate("ArtistDetails", {
             artist: {
-              id: songSheet.id,
+              id: songSheet.artistId ?? songSheet.id,
               name: songSheet.artist,
               image: songSheet.image,
             },
@@ -712,7 +743,7 @@ export const HomeScreen = () => {
 
   return (
     <SafeAreaView
-      style={[styles.safe, { backgroundColor: colors.background, paddingTop: Math.max(insets.top, 10) }]}
+      style={[styles.safe, { backgroundColor: colors.background, paddingTop: Math.max(insets.top, 20) }]}
       edges={["left", "right", "bottom"]}
     >
       <AppHeader colors={colors} onSearchPress={() => navigation.navigate("Search")} />
@@ -765,7 +796,11 @@ export const HomeScreen = () => {
         colors={colors}
         image={artistSheet?.image}
         title={artistSheet?.name}
-        subtitle={artistSheet ? `${artistSheet.albumCount ?? 0} Album   |   ${artistSheet.songCount ?? 0} Songs` : undefined}
+        subtitle={
+          artistSheet
+            ? `${(artistSheet.albumCount ?? 0).toString()} Album   |   ${(artistSheet.songCount ?? 0).toString()} Songs`
+            : undefined
+        }
         actions={artistActions}
       />
 

@@ -19,7 +19,7 @@ export const ArtistRow = ({ artist, colors, onPress, onMenuPress }: Props) => (
         {artist.name}
       </Text>
       <Text numberOfLines={1} style={[styles.meta, { color: colors.textSecondary }]}>
-        {artist.albumCount ?? 1} Album   |   {artist.songCount ?? 0} Songs
+        {(artist.albumCount ?? 0).toString()} Album   |   {(artist.songCount ?? 0).toString()} Songs
       </Text>
     </View>
     <Pressable

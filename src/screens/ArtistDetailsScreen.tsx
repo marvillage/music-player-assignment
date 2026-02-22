@@ -6,7 +6,7 @@ import { ActivityIndicator, FlatList, Image, Pressable, StyleSheet, Text, View }
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { BottomSheet } from "../components/BottomSheet";
-import { getArtistById, getArtistSongs } from "../api/saavn";
+import { getArtistById, getArtistSongs, searchSongs } from "../api/saavn";
 import { SongRow } from "../components/SongRow";
 import { useTheme } from "../hooks/useTheme";
 import type { RootStackParamList } from "../navigation/types";
@@ -63,8 +63,18 @@ export const ArtistDetailsScreen = () => {
         if (details) {
           setArtist(details);
         }
-        setSongs(topSongs.items);
-        cacheSongs(topSongs.items);
+        let nextSongs = topSongs.items;
+        if (nextSongs.length === 0) {
+          const fallback = await searchSongs(route.params.artist.name, 1);
+          const target = route.params.artist.name.trim().toLowerCase();
+          nextSongs = fallback.items.filter((song) => song.artist.toLowerCase().includes(target));
+          if (nextSongs.length === 0) {
+            nextSongs = fallback.items;
+          }
+        }
+
+        setSongs(nextSongs);
+        cacheSongs(nextSongs);
       } finally {
         if (mounted) {
           setLoading(false);
@@ -187,7 +197,7 @@ export const ArtistDetailsScreen = () => {
         onPress: () =>
           navigation.navigate("ArtistDetails", {
             artist: {
-              id: songSheet.id,
+              id: songSheet.artistId ?? songSheet.id,
               name: songSheet.artist,
               image: songSheet.image,
             },
@@ -285,7 +295,7 @@ export const ArtistDetailsScreen = () => {
             <Image source={{ uri: artist.image }} style={styles.hero} />
             <Text style={[styles.name, { color: colors.text }]}>{artist.name}</Text>
             <Text style={[styles.meta, { color: colors.textSecondary }]}>
-              {artist.albumCount ?? 1} Album   |   {songs.length} Songs   |   {formatDuration(totalDurationSec)} mins
+              {(artist.albumCount ?? 0).toString()} Album   |   {songs.length} Songs   |   {formatDuration(totalDurationSec)} mins
             </Text>
             <View style={styles.actions}>
               <Pressable style={[styles.primaryButton, { backgroundColor: colors.accent }]} onPress={shuffleAndPlay}>
@@ -353,7 +363,7 @@ export const ArtistDetailsScreen = () => {
         colors={colors}
         image={artist.image}
         title={artist.name}
-        subtitle={`${artist.albumCount ?? 0} Album   |   ${songs.length} Songs`}
+        subtitle={`${(artist.albumCount ?? 0).toString()} Album   |   ${songs.length} Songs`}
         actions={artistActions}
       />
 
@@ -383,6 +393,7 @@ export const ArtistDetailsScreen = () => {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
+    paddingTop: 12,
     paddingHorizontal: 20,
   },
   header: {
