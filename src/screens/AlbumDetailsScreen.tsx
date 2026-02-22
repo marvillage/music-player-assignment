@@ -28,6 +28,7 @@ export const AlbumDetailsScreen = () => {
 
   const [album, setAlbum] = useState<Album>(route.params.album);
   const [songs, setSongs] = useState<Song[]>([]);
+  const [showAllSongs, setShowAllSongs] = useState(false);
   const [loading, setLoading] = useState(true);
   const [songSheet, setSongSheet] = useState<Song | null>(null);
   const [playlistPickerSong, setPlaylistPickerSong] = useState<Song | null>(null);
@@ -57,6 +58,7 @@ export const AlbumDetailsScreen = () => {
     let mounted = true;
     (async () => {
       setLoading(true);
+      setShowAllSongs(false);
       try {
         let fallbackAlbum = route.params.album;
         let list: Song[] = [];
@@ -89,6 +91,12 @@ export const AlbumDetailsScreen = () => {
       mounted = false;
     };
   }, [cacheSongs, route.params.album]);
+
+  const hasCollapsedSongs = songs.length > 5;
+  const visibleSongs = useMemo(
+    () => (showAllSongs || !hasCollapsedSongs ? songs : songs.slice(0, 5)),
+    [hasCollapsedSongs, showAllSongs, songs]
+  );
 
   const totalDurationSec = useMemo(
     () => songs.reduce((acc, item) => acc + item.durationSec, 0),
@@ -328,7 +336,7 @@ export const AlbumDetailsScreen = () => {
       </View>
 
       <FlatList
-        data={songs}
+        data={visibleSongs}
         keyExtractor={(item) => item.id}
         ListHeaderComponent={
           <View>
@@ -365,7 +373,13 @@ export const AlbumDetailsScreen = () => {
             </View>
             <View style={[styles.songHeader, { borderTopColor: colors.border }]}>
               <Text style={[styles.songHeaderText, { color: colors.text }]}>Songs</Text>
-              <Text style={[styles.songHeaderAction, { color: colors.accent }]}>See All</Text>
+              {hasCollapsedSongs ? (
+                <Pressable onPress={() => setShowAllSongs((value) => !value)}>
+                  <Text style={[styles.songHeaderAction, { color: colors.accent }]}>
+                    {showAllSongs ? "See Less" : "See All"}
+                  </Text>
+                </Pressable>
+              ) : null}
             </View>
           </View>
         }

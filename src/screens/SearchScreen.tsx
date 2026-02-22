@@ -5,7 +5,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -34,12 +33,8 @@ import { shareArtist, shareSong } from "../utils/share";
 
 const CATEGORIES = ["Songs", "Artists", "Albums", "Folders"] as const;
 type SearchCategory = (typeof CATEGORIES)[number];
-
 const LANGUAGE_FILTERS = ["All", "Hindi", "English", "Punjabi"] as const;
 type LanguageFilter = (typeof LANGUAGE_FILTERS)[number];
-
-const DURATION_FILTERS = ["All", "Short", "Medium", "Long"] as const;
-type DurationFilter = (typeof DURATION_FILTERS)[number];
 
 const TRENDING_FALLBACK = [
   "anirudh",
@@ -97,19 +92,6 @@ const findClosestQuery = (input: string, candidates: string[]): string | null =>
   return bestScore <= 3 ? best : null;
 };
 
-const includeByDuration = (song: Song, filter: DurationFilter): boolean => {
-  if (filter === "All") {
-    return true;
-  }
-  if (filter === "Short") {
-    return song.durationSec <= 180;
-  }
-  if (filter === "Medium") {
-    return song.durationSec > 180 && song.durationSec <= 300;
-  }
-  return song.durationSec > 300;
-};
-
 export const SearchScreen = () => {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const { colors } = useTheme();
@@ -140,7 +122,6 @@ export const SearchScreen = () => {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<SearchCategory>("Songs");
   const [languageFilter, setLanguageFilter] = useState<LanguageFilter>("All");
-  const [durationFilter, setDurationFilter] = useState<DurationFilter>("All");
   const [loading, setLoading] = useState(false);
   const [songs, setSongs] = useState<Song[]>([]);
   const [artists, setArtists] = useState<Artist[]>([]);
@@ -150,37 +131,67 @@ export const SearchScreen = () => {
   const [playlistPickerSong, setPlaylistPickerSong] = useState<Song | null>(null);
   const [artistSheet, setArtistSheet] = useState<Artist | null>(null);
   const [clearSearchConfirmVisible, setClearSearchConfirmVisible] = useState(false);
+  const hasActiveSongFilters = languageFilter !== "All";
 
   const enrichArtistsWithStats = useCallback(async (items: Artist[]): Promise<Artist[]> => {
-    if (Platform.OS === "web") {
-      return items;
-    }
-
     const missingStats = items
       .filter((item) => item.albumCount === undefined || item.songCount === undefined)
-      .slice(0, 12);
+      .slice(0, 36);
     if (missingStats.length === 0) {
       return items;
     }
 
-    const detailResults = await Promise.allSettled(missingStats.map((item) => getArtistById(item.id)));
-    const detailById = new Map<string, Artist>();
-    detailResults.forEach((result, index) => {
-      if (result.status !== "fulfilled" || !result.value) {
+    const statsResults = await Promise.allSettled(
+      missingStats.map(async (item) => {
+        const [detail, songsResult] = await Promise.all([
+          getArtistById(item.id),
+          getArtistSongs(item.id, 1),
+        ]);
+
+        const derivedSongCount =
+          item.songCount ??
+          detail?.songCount ??
+          (songsResult.total > 0 ? songsResult.total : undefined) ??
+          (songsResult.items.length > 0 ? songsResult.items.length : undefined);
+
+        const albumKeys = new Set(
+          songsResult.items
+            .map((song) => song.albumId ?? song.albumName?.trim().toLowerCase())
+            .filter((value): value is string => Boolean(value && value.length > 0))
+        );
+        const derivedAlbumCount =
+          item.albumCount ??
+          detail?.albumCount ??
+          (albumKeys.size > 0 ? albumKeys.size : undefined);
+
+        return {
+          id: item.id,
+          albumCount: derivedAlbumCount,
+          songCount: derivedSongCount,
+        };
+      })
+    );
+
+    const statsById = new Map<string, { albumCount?: number; songCount?: number }>();
+    statsResults.forEach((result) => {
+      if (result.status !== "fulfilled") {
         return;
       }
-      detailById.set(missingStats[index].id, result.value);
+      statsById.set(result.value.id, {
+        albumCount: result.value.albumCount,
+        songCount: result.value.songCount,
+      });
     });
 
     return items.map((item) => {
-      const detail = detailById.get(item.id);
-      if (!detail) {
+      const stats = statsById.get(item.id);
+      if (!stats) {
         return item;
       }
       return {
         ...item,
-        albumCount: item.albumCount ?? detail.albumCount ?? 0,
-        songCount: item.songCount ?? detail.songCount ?? 0,
+        albumCount: item.albumCount ?? stats.albumCount,
+        songCount: item.songCount ?? stats.songCount,
       };
     });
   }, []);
@@ -238,12 +249,11 @@ export const SearchScreen = () => {
 
   const folderSongs = useMemo(() => songs.filter((song) => Boolean(downloaded[song.id])), [downloaded, songs]);
   const displayedSongs = useMemo(() => {
-    const base = category === "Folders" ? folderSongs : songs;
-    return base.filter((song) => {
-      const languagePass = languageFilter === "All" || song.language?.toLowerCase() === languageFilter.toLowerCase();
-      return languagePass && includeByDuration(song, durationFilter);
-    });
-  }, [category, durationFilter, folderSongs, languageFilter, songs]);
+    const source = category === "Folders" ? folderSongs : songs;
+    return source.filter(
+      (song) => languageFilter === "All" || song.language?.toLowerCase() === languageFilter.toLowerCase()
+    );
+  }, [category, folderSongs, languageFilter, songs]);
 
   const submitSearch = () => {
     const trimmed = query.trim();
@@ -265,6 +275,7 @@ export const SearchScreen = () => {
   };
 
   const confirmClearSearchHistory = () => setClearSearchConfirmVisible(true);
+  const resetSongFilters = () => setLanguageFilter("All");
 
   const songActions = useMemo(() => {
     if (!songSheet) {
@@ -451,30 +462,21 @@ export const SearchScreen = () => {
 
   const renderSongFilters = () => (
     <View style={styles.filtersWrap}>
+      <View style={styles.filterHeader}>
+        <Text style={[styles.filterTitle, { color: colors.text }]}>Filters</Text>
+        {hasActiveSongFilters ? (
+          <Pressable onPress={resetSongFilters}>
+            <Text style={[styles.filterReset, { color: colors.accent }]}>Reset</Text>
+          </Pressable>
+        ) : null}
+      </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
         {LANGUAGE_FILTERS.map((item) => {
           const active = languageFilter === item;
           return (
             <Pressable
               key={item}
-              onPress={() => setLanguageFilter(item)}
-              style={[
-                styles.filterChip,
-                { borderColor: colors.border, backgroundColor: active ? colors.accentSoft : colors.surface },
-              ]}
-            >
-              <Text style={[styles.filterChipText, { color: active ? colors.accent : colors.textSecondary }]}>{item}</Text>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-        {DURATION_FILTERS.map((item) => {
-          const active = durationFilter === item;
-          return (
-            <Pressable
-              key={item}
-              onPress={() => setDurationFilter(item)}
+              onPress={() => setLanguageFilter(active && item !== "All" ? "All" : item)}
               style={[
                 styles.filterChip,
                 { borderColor: colors.border, backgroundColor: active ? colors.accentSoft : colors.surface },
@@ -548,12 +550,23 @@ export const SearchScreen = () => {
       if (!displayedSongs.length) {
         return (
           <View style={styles.emptyWrap}>
-            <EmptyState
-              colors={colors}
-              title="Not Found"
-              message="Sorry, the keyword you entered cannot be found. Try another keyword."
-              icon="sad-outline"
-            />
+            {renderSongFilters()}
+            <View style={styles.emptyStateBody}>
+              <EmptyState
+                colors={colors}
+                title="Not Found"
+                message="Sorry, the keyword you entered cannot be found. Try another keyword."
+                icon="sad-outline"
+              />
+            </View>
+            {hasActiveSongFilters ? (
+              <Pressable
+                onPress={resetSongFilters}
+                style={[styles.didYouMeanChip, { borderColor: colors.accent, backgroundColor: colors.accentSoft }]}
+              >
+                <Text style={[styles.didYouMeanText, { color: colors.accent }]}>Clear filters</Text>
+              </Pressable>
+            ) : null}
             {didYouMean ? (
               <Pressable
                 onPress={() => {
@@ -811,6 +824,20 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 8,
     paddingHorizontal: 16,
+    paddingTop: 6,
+  },
+  filterHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  filterTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 14,
+  },
+  filterReset: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: 13,
   },
   filterRow: {
     gap: 8,
@@ -887,6 +914,9 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   emptyWrap: {
+    flex: 1,
+  },
+  emptyStateBody: {
     flex: 1,
     justifyContent: "center",
   },

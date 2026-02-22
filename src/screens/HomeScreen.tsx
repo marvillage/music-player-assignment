@@ -6,7 +6,6 @@ import {
   ActivityIndicator,
   FlatList,
   Image,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -89,6 +88,8 @@ const SONG_SORT_OPTIONS: SortOption[] = [
   "Date Modified",
   "Composer",
 ];
+const ARTIST_SORT_OPTIONS: SortOption[] = ["Date Added", "Ascending", "Descending"];
+const ALBUM_SORT_OPTIONS: SortOption[] = ["Date Added", "Date Modified", "Ascending", "Descending", "Year"];
 const PLACEHOLDER_IMAGE_TOKEN = "placeholder_view_vector.svg";
 
 const uniqueById = <T extends { id: string }>(items: T[]): T[] => {
@@ -210,7 +211,9 @@ export const HomeScreen = () => {
 
   const [activeTab, setActiveTab] = useState("Suggested");
   const [songSort, setSongSort] = useState<SortOption>("Ascending");
-  const [sortVisible, setSortVisible] = useState(false);
+  const [artistSort, setArtistSort] = useState<SortOption>("Date Added");
+  const [albumSort, setAlbumSort] = useState<SortOption>("Date Added");
+  const [sortSheetTarget, setSortSheetTarget] = useState<"songs" | "artists" | "albums" | null>(null);
   const [songSheet, setSongSheet] = useState<Song | null>(null);
   const [playlistPickerSong, setPlaylistPickerSong] = useState<Song | null>(null);
   const [artistSheet, setArtistSheet] = useState<Artist | null>(null);
@@ -281,6 +284,32 @@ export const HomeScreen = () => {
   }, [cacheSongs, downloaded, songCache]);
 
   const sortedSongs = useMemo(() => sortSongs(songs, songSort), [songs, songSort]);
+  const sortedArtists = useMemo(() => {
+    const copy = [...artists];
+    if (artistSort === "Ascending") {
+      return copy.sort((a, b) => a.name.localeCompare(b.name));
+    }
+    if (artistSort === "Descending") {
+      return copy.sort((a, b) => b.name.localeCompare(a.name));
+    }
+    return copy;
+  }, [artistSort, artists]);
+  const sortedAlbums = useMemo(() => {
+    const copy = [...albums];
+    if (albumSort === "Ascending") {
+      return copy.sort((a, b) => a.name.localeCompare(b.name));
+    }
+    if (albumSort === "Descending") {
+      return copy.sort((a, b) => b.name.localeCompare(a.name));
+    }
+    if (albumSort === "Year") {
+      return copy.sort((a, b) => (b.year ?? "").localeCompare(a.year ?? ""));
+    }
+    if (albumSort === "Date Modified") {
+      return copy.reverse();
+    }
+    return copy;
+  }, [albumSort, albums]);
   const recentList = suggestedSongs.length > 0 ? suggestedSongs : recentlyPlayed;
   const newForYouSongs = useMemo(
     () => uniqueById([...suggestedSongs, ...recentlyPlayed, ...mostPlayed]).slice(0, 10),
@@ -399,35 +428,64 @@ export const HomeScreen = () => {
   );
 
   const enrichArtistsWithStats = useCallback(async (items: Artist[]): Promise<Artist[]> => {
-    if (Platform.OS === "web") {
-      return items;
-    }
-
     const missingStats = items
       .filter((item) => item.albumCount === undefined || item.songCount === undefined)
-      .slice(0, 12);
+      .slice(0, 36);
     if (missingStats.length === 0) {
       return items;
     }
 
-    const detailResults = await Promise.allSettled(missingStats.map((item) => getArtistById(item.id)));
-    const detailById = new Map<string, Artist>();
-    detailResults.forEach((result, index) => {
-      if (result.status !== "fulfilled" || !result.value) {
+    const statsResults = await Promise.allSettled(
+      missingStats.map(async (item) => {
+        const [detail, songsResult] = await Promise.all([
+          getArtistById(item.id),
+          getArtistSongs(item.id, 1),
+        ]);
+
+        const derivedSongCount =
+          item.songCount ??
+          detail?.songCount ??
+          (songsResult.total > 0 ? songsResult.total : undefined) ??
+          (songsResult.items.length > 0 ? songsResult.items.length : undefined);
+
+        const albumKeys = new Set(
+          songsResult.items
+            .map((song) => song.albumId ?? song.albumName?.trim().toLowerCase())
+            .filter((value): value is string => Boolean(value && value.length > 0))
+        );
+        const derivedAlbumCount =
+          item.albumCount ??
+          detail?.albumCount ??
+          (albumKeys.size > 0 ? albumKeys.size : undefined);
+
+        return {
+          id: item.id,
+          albumCount: derivedAlbumCount,
+          songCount: derivedSongCount,
+        };
+      })
+    );
+
+    const statsById = new Map<string, { albumCount?: number; songCount?: number }>();
+    statsResults.forEach((result) => {
+      if (result.status !== "fulfilled") {
         return;
       }
-      detailById.set(missingStats[index].id, result.value);
+      statsById.set(result.value.id, {
+        albumCount: result.value.albumCount,
+        songCount: result.value.songCount,
+      });
     });
 
     return items.map((item) => {
-      const detail = detailById.get(item.id);
-      if (!detail) {
+      const stats = statsById.get(item.id);
+      if (!stats) {
         return item;
       }
       return {
         ...item,
-        albumCount: item.albumCount ?? detail.albumCount ?? 0,
-        songCount: item.songCount ?? detail.songCount ?? 0,
+        albumCount: item.albumCount ?? stats.albumCount,
+        songCount: item.songCount ?? stats.songCount,
       };
     });
   }, []);
@@ -850,7 +908,7 @@ export const HomeScreen = () => {
       ListHeaderComponent={
         <View style={[styles.listHeader, { borderBottomColor: colors.border }]}>
           <Text style={[styles.count, { color: colors.text }]}>{songsTotal || songs.length} songs</Text>
-          <Pressable onPress={() => setSortVisible(true)} style={styles.sortRow}>
+          <Pressable onPress={() => setSortSheetTarget("songs")} style={styles.sortRow}>
             <Text style={[styles.sortText, { color: colors.accent }]}>{songSort}</Text>
             <Ionicons name="swap-vertical" size={16} color={colors.accent} />
           </Pressable>
@@ -882,7 +940,7 @@ export const HomeScreen = () => {
 
   const renderArtists = () => (
     <FlatList
-      data={artists}
+      data={sortedArtists}
       keyExtractor={(item) => item.id}
       onEndReachedThreshold={0.4}
       onEndReached={() => {
@@ -892,8 +950,11 @@ export const HomeScreen = () => {
       }}
       ListHeaderComponent={
         <View style={[styles.listHeader, { borderBottomColor: colors.border }]}>
-          <Text style={[styles.count, { color: colors.text }]}>{artistsTotal || artists.length} artists</Text>
-          <Text style={[styles.sortText, { color: colors.accent }]}>Date Added</Text>
+          <Text style={[styles.count, { color: colors.text }]}>{artistsTotal || sortedArtists.length} artists</Text>
+          <Pressable onPress={() => setSortSheetTarget("artists")} style={styles.sortRow}>
+            <Text style={[styles.sortText, { color: colors.accent }]}>{artistSort}</Text>
+            <Ionicons name="swap-vertical" size={16} color={colors.accent} />
+          </Pressable>
         </View>
       }
       renderItem={({ item }) => (
@@ -919,7 +980,7 @@ export const HomeScreen = () => {
 
   const renderAlbums = () => (
     <FlatList
-      data={albums}
+      data={sortedAlbums}
       keyExtractor={(item) => item.id}
       numColumns={2}
       contentContainerStyle={styles.gridList}
@@ -932,8 +993,11 @@ export const HomeScreen = () => {
       }}
       ListHeaderComponent={
         <View style={[styles.listHeader, { borderBottomColor: colors.border }]}>
-          <Text style={[styles.count, { color: colors.text }]}>{albumsTotal || albums.length} albums</Text>
-          <Text style={[styles.sortText, { color: colors.accent }]}>Date Modified</Text>
+          <Text style={[styles.count, { color: colors.text }]}>{albumsTotal || sortedAlbums.length} albums</Text>
+          <Pressable onPress={() => setSortSheetTarget("albums")} style={styles.sortRow}>
+            <Text style={[styles.sortText, { color: colors.accent }]}>{albumSort}</Text>
+            <Ionicons name="swap-vertical" size={16} color={colors.accent} />
+          </Pressable>
         </View>
       }
       renderItem={({ item }) => (
@@ -1012,16 +1076,34 @@ export const HomeScreen = () => {
       </View>
 
       <BottomSheet
-        visible={sortVisible}
-        onClose={() => setSortVisible(false)}
+        visible={Boolean(sortSheetTarget)}
+        onClose={() => setSortSheetTarget(null)}
         colors={colors}
-        actions={SONG_SORT_OPTIONS.map((option) => ({
-          id: option,
-          label: option,
-          active: option === songSort,
-          showRadio: true,
-          onPress: () => setSongSort(option),
-        }))}
+        actions={
+          sortSheetTarget === "songs"
+            ? SONG_SORT_OPTIONS.map((option) => ({
+                id: option,
+                label: option,
+                active: option === songSort,
+                showRadio: true,
+                onPress: () => setSongSort(option),
+              }))
+            : sortSheetTarget === "artists"
+            ? ARTIST_SORT_OPTIONS.map((option) => ({
+                id: option,
+                label: option,
+                active: option === artistSort,
+                showRadio: true,
+                onPress: () => setArtistSort(option),
+              }))
+            : ALBUM_SORT_OPTIONS.map((option) => ({
+                id: option,
+                label: option,
+                active: option === albumSort,
+                showRadio: true,
+                onPress: () => setAlbumSort(option),
+              }))
+        }
       />
 
       <BottomSheet

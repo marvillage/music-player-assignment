@@ -28,6 +28,7 @@ export const ArtistDetailsScreen = () => {
 
   const [artist, setArtist] = useState<Artist>(route.params.artist);
   const [songs, setSongs] = useState<Song[]>([]);
+  const [showAllSongs, setShowAllSongs] = useState(false);
   const [loading, setLoading] = useState(true);
   const [songSheet, setSongSheet] = useState<Song | null>(null);
   const [playlistPickerSong, setPlaylistPickerSong] = useState<Song | null>(null);
@@ -57,6 +58,7 @@ export const ArtistDetailsScreen = () => {
     let mounted = true;
     (async () => {
       setLoading(true);
+      setShowAllSongs(false);
       try {
         const [details, topSongs] = await Promise.all([
           getArtistById(route.params.artist.id),
@@ -90,6 +92,12 @@ export const ArtistDetailsScreen = () => {
       mounted = false;
     };
   }, [cacheSongs, route.params.artist.id]);
+
+  const hasCollapsedSongs = songs.length > 5;
+  const visibleSongs = useMemo(
+    () => (showAllSongs || !hasCollapsedSongs ? songs : songs.slice(0, 5)),
+    [hasCollapsedSongs, showAllSongs, songs]
+  );
 
   const totalDurationSec = songs.reduce((acc, item) => acc + item.durationSec, 0);
 
@@ -311,7 +319,7 @@ export const ArtistDetailsScreen = () => {
       </View>
 
       <FlatList
-        data={songs}
+        data={visibleSongs}
         keyExtractor={(item) => item.id}
         ListHeaderComponent={
           <View>
@@ -348,7 +356,13 @@ export const ArtistDetailsScreen = () => {
             </View>
             <View style={[styles.songHeader, { borderTopColor: colors.border }]}>
               <Text style={[styles.songHeaderText, { color: colors.text }]}>Songs</Text>
-              <Text style={[styles.songHeaderAction, { color: colors.accent }]}>See All</Text>
+              {hasCollapsedSongs ? (
+                <Pressable onPress={() => setShowAllSongs((value) => !value)}>
+                  <Text style={[styles.songHeaderAction, { color: colors.accent }]}>
+                    {showAllSongs ? "See Less" : "See All"}
+                  </Text>
+                </Pressable>
+              ) : null}
             </View>
           </View>
         }
